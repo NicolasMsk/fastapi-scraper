@@ -105,8 +105,8 @@ def scrape_vouchercodes_single(url, title):
                     button.click()
                     print(f"   ✅ Clic effectué sur le bouton")
                     
-                    # Attendre qu'un nouvel onglet s'ouvre
-                    time.sleep(5)
+                    # Attendre qu'un nouvel onglet s'ouvre (attendre 3 secondes comme dans le batch)
+                    time.sleep(3)
                     
                     # Trouver le nouvel onglet
                     windows_after = set(driver.window_handles)
@@ -118,12 +118,14 @@ def scrape_vouchercodes_single(url, title):
                         new_window = new_windows.pop()
                         driver.switch_to.window(new_window)
                         print(f"   📱 Switché vers nouvel onglet")
-                        time.sleep(5)
+                        print(f"   🔗 URL: {driver.current_url[:80]}")
+                        time.sleep(2)
                         
-                        # Récupérer le code et FINI !
+                        # Récupérer le code depuis la popup
+                        code = None
                         try:
                             print(f"   🔍 Recherche du code...")
-                            code_element = WebDriverWait(driver, 15).until(
+                            code_element = WebDriverWait(driver, 10).until(
                                 EC.presence_of_element_located((By.CSS_SELECTOR, "p[data-qa='el:code']"))
                             )
                             code = code_element.text.strip()
@@ -137,26 +139,42 @@ def scrape_vouchercodes_single(url, title):
                             }
                             
                         except Exception as e:
-                            print(f"   ❌ Code non trouvé avec CSS selector, tentative avec XPath: {e}")
+                            print(f"   ❌ Code non trouvé avec CSS selector: {e}")
                             # Essayer avec d'autres sélecteurs
-                            try:
-                                code_element = driver.find_element(By.XPATH, "//p[contains(@class, 'font-bold') and contains(@class, 'tracking-wide')]")
-                                code = code_element.text.strip()
-                                print(f"   ✅ CODE TROUVÉ (XPath): {code}")
-                                
-                                return {
-                                    "success": True,
-                                    "code": code,
-                                    "title": offer_title,
-                                    "message": "Code trouvé avec succès"
-                                }
-                            except:
+                            selectors = [
+                                ("XPATH", "//p[@data-qa='el:code']"),
+                                ("CSS", "p.font-bold.tracking-wide"),
+                                ("XPATH", "//p[contains(@class, 'font-bold') and contains(@class, 'tracking-wide')]")
+                            ]
+                            
+                            for selector_type, selector in selectors:
+                                try:
+                                    if selector_type == "XPATH":
+                                        elements = driver.find_elements(By.XPATH, selector)
+                                    else:
+                                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                                    
+                                    for element in elements:
+                                        text = element.text.strip()
+                                        if text and len(text) >= 3:
+                                            code = text
+                                            print(f"   ✅ CODE TROUVÉ ({selector_type}): {code}")
+                                            return {
+                                                "success": True,
+                                                "code": code,
+                                                "title": offer_title,
+                                                "message": "Code trouvé avec succès"
+                                            }
+                                except:
+                                    continue
+                            
+                            if not code:
                                 print(f"   ❌ Code vraiment introuvable")
                                 return {
                                     "success": False,
                                     "code": None,
                                     "title": offer_title,
-                                    "message": f"Code non trouvé: {str(e)}"
+                                    "message": "Code non trouvé dans le nouvel onglet"
                                 }
                     else:
                         print(f"   ⚠️ PROBLÈME: Aucun nouvel onglet ne s'est ouvert!")
