@@ -22,10 +22,10 @@ class ScrapeRequestHotUKDeals(BaseModel):
     
     class Config:
         json_schema_extra = {
-            "example": {
-                "title": "Get 15% off your parking reservation using this Birmingham Airport Parking promo code",
-                "url": "https://www.hotukdeals.com/vouchers/birminghamairport.co.uk"
-            }
+                "example": {
+                    "title": "Get 20% off full price items on the app",
+                    "url": "https://www.hotukdeals.com/vouchers/asos.com"
+                }
         }
 
 
@@ -37,8 +37,8 @@ class ScrapeRequestVoucherCodes(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "title": "Get 20% off full price items on the app",
-                "url": "https://www.vouchercodes.co.uk/asos.com"
+                "title": "5% off First Orders at Acer",
+                "url": "https://www.vouchercodes.co.uk/uk-store.acer.com?oi=8792020"
             }
         }
 
