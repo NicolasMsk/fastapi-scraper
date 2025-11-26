@@ -47,7 +47,7 @@ def scrape_vouchercodes_single(url, title):
     try:
         print(f"\n🔍 Chargement de: {url}")
         driver.get(url)
-        time.sleep(3)
+        time.sleep(5)
         
         # Gérer le cookie banner
         try:
@@ -101,12 +101,12 @@ def scrape_vouchercodes_single(url, title):
                     
                     # Scroll et clic
                     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
-                    time.sleep(0.1)
+                    time.sleep(0.5)
                     button.click()
                     print(f"   ✅ Clic effectué sur le bouton")
                     
                     # Attendre qu'un nouvel onglet s'ouvre
-                    time.sleep(3)
+                    time.sleep(5)
                     
                     # Trouver le nouvel onglet
                     windows_after = set(driver.window_handles)
@@ -118,12 +118,12 @@ def scrape_vouchercodes_single(url, title):
                         new_window = new_windows.pop()
                         driver.switch_to.window(new_window)
                         print(f"   📱 Switché vers nouvel onglet")
-                        time.sleep(2)
+                        time.sleep(5)
                         
                         # Récupérer le code et FINI !
                         try:
                             print(f"   🔍 Recherche du code...")
-                            code_element = WebDriverWait(driver, 10).until(
+                            code_element = WebDriverWait(driver, 15).until(
                                 EC.presence_of_element_located((By.CSS_SELECTOR, "p[data-qa='el:code']"))
                             )
                             code = code_element.text.strip()
