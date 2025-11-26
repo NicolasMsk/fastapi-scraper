@@ -37,8 +37,8 @@ class ScrapeRequestVoucherCodes(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "title": "5% off First Orders at Acer",
-                "url": "https://www.vouchercodes.co.uk/uk-store.acer.com?oi=8792020"
+                "title": "Get 20% off full price items on the app",
+                "url": "https://www.vouchercodes.co.uk/asos.com"
             }
         }
 
