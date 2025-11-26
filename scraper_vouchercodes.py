@@ -47,38 +47,21 @@ def scrape_vouchercodes_single(url, title):
     try:
         print(f"\n🔍 Chargement de: {url}")
         driver.get(url)
-        time.sleep(1.5)
-        
-        # Arrêter le chargement immédiatement
-        try:
-            driver.execute_script("window.stop();")
-        except:
-            pass
-        
-        time.sleep(0.3)
+        time.sleep(3)
         
         # Gérer le cookie banner
         try:
-            cookie_button = WebDriverWait(driver, 2).until(
+            cookie_button = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
             )
             cookie_button.click()
             print("   ✅ Cookie banner fermé")
-            time.sleep(0.5)
+            time.sleep(2)
         except:
             print("   ℹ️ Pas de cookie banner")
-            time.sleep(0.2)
+            time.sleep(1)
         
         vouchercodes_window = driver.current_window_handle
-        
-        # Attendre que les offres se chargent (IMPORTANT pour le contenu dynamique)
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "span.align-middle"))
-            )
-            print(f"   ✅ Offres chargées")
-        except:
-            print(f"   ⚠️ Timeout: offres non trouvées avec le sélecteur")
         
         # Chercher tous les titres d'offres
         offer_spans = driver.find_elements(By.CSS_SELECTOR, "span.align-middle")
@@ -123,7 +106,7 @@ def scrape_vouchercodes_single(url, title):
                     print(f"   ✅ Clic effectué sur le bouton")
                     
                     # Attendre qu'un nouvel onglet s'ouvre
-                    time.sleep(1.5)
+                    time.sleep(3)
                     
                     # Trouver le nouvel onglet
                     windows_after = set(driver.window_handles)
@@ -135,13 +118,12 @@ def scrape_vouchercodes_single(url, title):
                         new_window = new_windows.pop()
                         driver.switch_to.window(new_window)
                         print(f"   📱 Switché vers nouvel onglet")
-                        driver.execute_script("window.stop();")
-                        time.sleep(1)
+                        time.sleep(2)
                         
                         # Récupérer le code et FINI !
                         try:
                             print(f"   🔍 Recherche du code...")
-                            code_element = WebDriverWait(driver, 4).until(
+                            code_element = WebDriverWait(driver, 10).until(
                                 EC.presence_of_element_located((By.CSS_SELECTOR, "p[data-qa='el:code']"))
                             )
                             code = code_element.text.strip()

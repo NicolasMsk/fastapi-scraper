@@ -47,15 +47,7 @@ def scrape_hotukdeals_single(url, title):
     try:
         print(f"\n🔍 Chargement de: {url}")
         driver.get(url)
-        time.sleep(1.5)
-        
-        # Arrêter le chargement immédiatement
-        try:
-            driver.execute_script("window.stop();")
-        except:
-            pass
-        
-        time.sleep(0.3)
+        time.sleep(3)
         
         # Gérer les popups/banners
         try:
@@ -63,7 +55,7 @@ def scrape_hotukdeals_single(url, title):
             for btn in close_buttons:
                 try:
                     driver.execute_script("arguments[0].click();", btn)
-                    time.sleep(0.2)
+                    time.sleep(0.5)
                 except:
                     pass
         except:
@@ -107,11 +99,11 @@ def scrape_hotukdeals_single(url, title):
                     
                     # Scroll et clic
                     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", see_code_button)
-                    time.sleep(0.1)
+                    time.sleep(0.5)
                     driver.execute_script("arguments[0].click();", see_code_button)
                     
                     # Attendre qu'un nouvel onglet s'ouvre
-                    time.sleep(1.5)
+                    time.sleep(3)
                     
                     # Trouver le nouvel onglet
                     windows_after = set(driver.window_handles)
@@ -121,19 +113,11 @@ def scrape_hotukdeals_single(url, title):
                         new_window = new_windows.pop()
                         driver.switch_to.window(new_window)
                         print(f"      📱 Switché vers nouvel onglet")
-                        time.sleep(0.8)
-                        
-                        # Arrêter le chargement immédiatement
-                        try:
-                            driver.execute_script("window.stop();")
-                        except:
-                            pass
-                        
-                        time.sleep(0.3)
+                        time.sleep(2)
                         
                         # Récupérer le code et FINI !
                         try:
-                            code_element = WebDriverWait(driver, 4).until(
+                            code_element = WebDriverWait(driver, 5).until(
                                 EC.presence_of_element_located((By.XPATH, "//h4[contains(@class, 'b8qpi79')]"))
                             )
                             code = code_element.text.strip()
