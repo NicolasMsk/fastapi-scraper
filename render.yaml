@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: fastapi-scraper
+    env: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /docs
