@@ -96,8 +96,12 @@ def check_url(url: str):
     try:
         response = requests.head(url, timeout=5, headers=headers, allow_redirects=True)
         return {"status_code": response.status_code}
-    except:
-        return {"status_code": 0}
+    except requests.exceptions.Timeout:
+        return {"status_code": 0, "error": "Timeout - URL took too long to respond"}
+    except requests.exceptions.ConnectionError:
+        return {"status_code": 0, "error": "Connection error - Could not connect to URL"}
+    except Exception as e:
+        return {"status_code": 0, "error": str(e)}
 
 
 @app.post("/scrape/hotukdeals", response_model=ScrapeResponse)
