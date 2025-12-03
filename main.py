@@ -82,22 +82,31 @@ async def root():
 
 
 @app.post("/check-url")
-def check_url(url: str):
+def check_url(url: str, timeout: int = 15):
     """
     Vérifie l'accessibilité d'une URL
     
     Args:
         url: L'URL à vérifier
+        timeout: Timeout en secondes (défaut: 15)
     
     Returns:
         Le code de statut HTTP de la réponse
     """
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
-        response = requests.head(url, timeout=5, headers=headers, allow_redirects=True)
+        # Essayer d'abord avec HEAD (plus rapide)
+        response = requests.head(url, timeout=timeout, headers=headers, allow_redirects=True)
         return {"status_code": response.status_code}
     except requests.exceptions.Timeout:
-        return {"status_code": 0, "error": "Timeout - URL took too long to respond"}
+        # Si timeout avec HEAD, essayer avec GET
+        try:
+            response = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True, stream=True)
+            return {"status_code": response.status_code}
+        except requests.exceptions.Timeout:
+            return {"status_code": 0, "error": "Timeout - URL took too long to respond (tried HEAD and GET)"}
+        except Exception as e:
+            return {"status_code": 0, "error": str(e)}
     except requests.exceptions.ConnectionError:
         return {"status_code": 0, "error": "Connection error - Could not connect to URL"}
     except Exception as e:
