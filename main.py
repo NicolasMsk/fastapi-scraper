@@ -6,7 +6,7 @@ import time
 import requests
 
 from scraper_hotukdeals import scrape_hotukdeals_all
-from scraper_vouchercodes import scrape_vouchercodes_single
+from scraper_vouchercodes import scrape_vouchercodes_single, scrape_vouchercodes_all
 from scraper_retailmenot import scrape_retailmenot_all
 from scraper_simplycodes import scrape_simplycodes_all
 
@@ -30,15 +30,13 @@ class ScrapeRequestHotUKDeals(BaseModel):
 
 
 class ScrapeRequestVoucherCodes(BaseModel):
-    """Modèle de requête pour le scraping VoucherCodes"""
-    title: str
+    """Modèle de requête pour le scraping VoucherCodes - TOUS les codes"""
     url: HttpUrl
     
     class Config:
         json_schema_extra = {
             "example": {
-                "title": "5% off First Orders at Acer",
-                "url": "https://www.vouchercodes.co.uk/uk-store.acer.com?oi=8792020"
+                "url": "https://www.vouchercodes.co.uk/tui.co.uk"
             }
         }
 
@@ -99,7 +97,7 @@ async def root():
         "message": "Bienvenue sur l'API de scraping de codes promo",
         "endpoints": {
             "hotukdeals": "/scrape/hotukdeals (récupère TOUS les codes)",
-            "vouchercodes": "/scrape/vouchercodes",
+            "vouchercodes": "/scrape/vouchercodes (récupère TOUS les codes)",
             "retailmenot": "/scrape/retailmenot (récupère TOUS les codes)",
             "simplycodes": "/scrape/simplycodes (récupère TOUS les codes)"
         },
@@ -184,18 +182,19 @@ async def scrape_hotukdeals_endpoint(request: ScrapeRequestHotUKDeals):
         )
 
 
-@app.post("/scrape/vouchercodes", response_model=ScrapeResponse)
-async def scrape_vouchercodes(request: ScrapeRequestVoucherCodes):
+@app.post("/scrape/vouchercodes", response_model=ScrapeAllResponse)
+async def scrape_vouchercodes_endpoint(request: ScrapeRequestVoucherCodes):
     """
-    Scrape un code promo depuis VoucherCodes
+    Scrape TOUS les codes promo d'une page VoucherCodes
     
     Args:
-        request: Objet contenant le titre et l'URL de l'offre
+        request: Objet contenant l'URL de la page VoucherCodes
     
     Returns:
-        Résultat du scraping avec le code trouvé (ou erreur)
+        Liste de tous les codes trouvés sur la page
     """
     start_time = time.time()
+    
     try:
         url_str = str(request.url)
         
@@ -206,20 +205,18 @@ async def scrape_vouchercodes(request: ScrapeRequestVoucherCodes):
                 detail="L'URL doit être une page VoucherCodes (vouchercodes.co.uk)"
             )
         
-        # Effectuer le scraping
-        result = scrape_vouchercodes_single(url_str, request.title)
+        # Effectuer le scraping de TOUS les codes
+        results = scrape_vouchercodes_all(url_str)
         
-        # Ajouter le temps d'exécution
+        # Calculer le temps d'exécution
         execution_time = round(time.time() - start_time, 2)
-        result["execution_time_seconds"] = execution_time
         
-        if not result["success"]:
-            raise HTTPException(
-                status_code=404,
-                detail=result["message"]
-            )
-        
-        return result
+        return ScrapeAllResponse(
+            success=len(results) > 0,
+            total_codes=len(results),
+            codes=results,
+            execution_time_seconds=execution_time
+        )
         
     except HTTPException:
         raise
