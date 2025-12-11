@@ -25,6 +25,13 @@ def get_driver():
     chrome_options.add_argument('--disable-infobars')
     chrome_options.add_argument('--disable-notifications')
     chrome_options.add_argument('--disable-popup-blocking')
+    # Options pour éviter les crashes mémoire
+    chrome_options.add_argument('--disable-software-rasterizer')
+    chrome_options.add_argument('--disable-setuid-sandbox')
+    chrome_options.add_argument('--single-process')
+    chrome_options.add_argument('--memory-pressure-off')
+    chrome_options.add_argument('--max_old_space_size=512')
+    chrome_options.add_argument('--js-flags=--max-old-space-size=512')
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
     
