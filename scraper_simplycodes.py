@@ -41,10 +41,9 @@ def scrape_simplycodes_all(url: str) -> list:
         
         options = get_chrome_options()
         driver = webdriver.Chrome(options=options)
-        driver.set_page_load_timeout(30)
         driver.get(url)
         
-        time.sleep(3)
+        time.sleep(5)
         print("[SimplyCodes ALL] Page chargée")
         
         # Trouver tous les boutons "Show Code"
@@ -77,12 +76,12 @@ def scrape_simplycodes_all(url: str) -> list:
             pass
         
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_button)
-        time.sleep(0.5)
+        time.sleep(1)
         
         actions = ActionChains(driver)
         actions.move_to_element(first_button).click().perform()
         print("[SimplyCodes ALL] Premier bouton cliqué")
-        time.sleep(2)
+        time.sleep(4)
         
         # Gérer le nouvel onglet
         new_windows = set(driver.window_handles)
@@ -97,7 +96,7 @@ def scrape_simplycodes_all(url: str) -> list:
                 
                 if "simplycodes" in current_url:
                     simplycodes_window = new_window
-                    time.sleep(1)
+                    time.sleep(2)
                     
                     # RÉCUPÉRER LE PREMIER CODE DEPUIS LA POPUP
                     try:
@@ -131,7 +130,7 @@ def scrape_simplycodes_all(url: str) -> list:
                         actions = ActionChains(driver)
                         actions.move_to_element(close_button).click().perform()
                         print("[SimplyCodes ALL] Popup fermée avec le bouton X")
-                        time.sleep(1)
+                        time.sleep(2)
                     except Exception as e:
                         print(f"[SimplyCodes ALL] Pas de bouton X trouvé: {e}")
             
@@ -140,7 +139,7 @@ def scrape_simplycodes_all(url: str) -> list:
             else:
                 driver.switch_to.window(original_window)
         
-        time.sleep(1)
+        time.sleep(2)
         
         # Maintenant récupérer TOUS les codes visibles sur la page
         print("[SimplyCodes ALL] Récupération de tous les codes visibles...")
