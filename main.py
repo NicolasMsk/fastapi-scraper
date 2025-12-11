@@ -8,6 +8,7 @@ import requests
 from scraper_hotukdeals import scrape_hotukdeals_single
 from scraper_vouchercodes import scrape_vouchercodes_single
 from scraper_retailmenot import scrape_retailmenot_all
+from scraper_simplycodes import scrape_simplycodes_all
 
 app = FastAPI(
     title="Scraper API",
@@ -56,6 +57,18 @@ class ScrapeRequestRetailMeNot(BaseModel):
         }
 
 
+class ScrapeRequestSimplyCodes(BaseModel):
+    """Modèle de requête pour le scraping SimplyCodes - TOUS les codes"""
+    url: HttpUrl
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "url": "https://simplycodes.com/store/autodesk.com"
+            }
+        }
+
+
 class ScrapeResponse(BaseModel):
     """Modèle de réponse pour le scraping"""
     success: bool
@@ -89,7 +102,8 @@ async def root():
         "endpoints": {
             "hotukdeals": "/scrape/hotukdeals",
             "vouchercodes": "/scrape/vouchercodes",
-            "retailmenot": "/scrape/retailmenot (récupère TOUS les codes)"
+            "retailmenot": "/scrape/retailmenot (récupère TOUS les codes)",
+            "simplycodes": "/scrape/simplycodes (récupère TOUS les codes)"
         },
         "documentation": "/docs"
     }
@@ -247,6 +261,54 @@ async def scrape_retailmenot(request: ScrapeRequestRetailMeNot):
         
         # Effectuer le scraping de TOUS les codes
         results = scrape_retailmenot_all(url_str)
+        
+        # Calculer le temps d'exécution
+        execution_time = round(time.time() - start_time, 2)
+        
+        return ScrapeAllResponse(
+            success=len(results) > 0,
+            total_codes=len(results),
+            codes=results,
+            execution_time_seconds=execution_time
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erreur interne lors du scraping: {str(e)}"
+        )
+
+
+@app.post("/scrape/simplycodes", response_model=ScrapeAllResponse)
+async def scrape_simplycodes(request: ScrapeRequestSimplyCodes):
+    """
+    Scrape TOUS les codes promo depuis une page SimplyCodes
+    
+    Args:
+        request: Objet contenant l'URL de la page SimplyCodes
+    
+    Returns:
+        Liste de tous les codes promo trouvés sur la page
+    
+    Example:
+        POST /scrape/simplycodes
+        {"url": "https://simplycodes.com/store/autodesk.com"}
+    """
+    start_time = time.time()
+    try:
+        url_str = str(request.url)
+        
+        # Vérifier que c'est bien une URL SimplyCodes
+        if "simplycodes.com" not in url_str:
+            raise HTTPException(
+                status_code=400,
+                detail="L'URL doit être une page SimplyCodes (simplycodes.com)"
+            )
+        
+        # Effectuer le scraping de TOUS les codes
+        results = scrape_simplycodes_all(url_str)
         
         # Calculer le temps d'exécution
         execution_time = round(time.time() - start_time, 2)
