@@ -87,6 +87,7 @@ class ScrapeAllResponse(BaseModel):
     success: bool
     total_codes: int
     codes: List[ScrapeResponseItem]
+    message: str
     execution_time_seconds: float
 
 
@@ -166,10 +167,17 @@ async def scrape_hotukdeals_endpoint(request: ScrapeRequestHotUKDeals):
         # Calculer le temps d'exécution
         execution_time = round(time.time() - start_time, 2)
         
+        # Message selon le résultat
+        if len(results) > 0:
+            message = f"{len(results)} code(s) found on the page"
+        else:
+            message = "No code found on this page"
+        
         return ScrapeAllResponse(
             success=len(results) > 0,
             total_codes=len(results),
             codes=results,
+            message=message,
             execution_time_seconds=execution_time
         )
         
@@ -211,10 +219,17 @@ async def scrape_vouchercodes_endpoint(request: ScrapeRequestVoucherCodes):
         # Calculer le temps d'exécution
         execution_time = round(time.time() - start_time, 2)
         
+        # Message selon le résultat
+        if len(results) > 0:
+            message = f"{len(results)} code(s) found on the page"
+        else:
+            message = "No code found on this page"
+        
         return ScrapeAllResponse(
             success=len(results) > 0,
             total_codes=len(results),
             codes=results,
+            message=message,
             execution_time_seconds=execution_time
         )
         
@@ -259,10 +274,17 @@ async def scrape_retailmenot(request: ScrapeRequestRetailMeNot):
         # Calculer le temps d'exécution
         execution_time = round(time.time() - start_time, 2)
         
+        # Message selon le résultat
+        if len(results) > 0:
+            message = f"{len(results)} code(s) found on the page"
+        else:
+            message = "No code found on this page"
+        
         return ScrapeAllResponse(
             success=len(results) > 0,
             total_codes=len(results),
             codes=results,
+            message=message,
             execution_time_seconds=execution_time
         )
         
@@ -307,10 +329,17 @@ async def scrape_simplycodes(request: ScrapeRequestSimplyCodes):
         # Calculer le temps d'exécution
         execution_time = round(time.time() - start_time, 2)
         
+        # Message selon le résultat
+        if len(results) > 0:
+            message = f"{len(results)} code(s) found on the page"
+        else:
+            message = "No code found on this page"
+        
         return ScrapeAllResponse(
             success=len(results) > 0,
             total_codes=len(results),
             codes=results,
+            message=message,
             execution_time_seconds=execution_time
         )
         
