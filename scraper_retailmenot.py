@@ -19,13 +19,14 @@ def get_driver():
     chrome_options.add_argument('--ignore-certificate-errors')
     chrome_options.add_argument('--ignore-ssl-errors')
     chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+    
+    # OPTIMISATIONS EXTRÊMES POUR RAILWAY (512MB RAM)
     chrome_options.add_argument('--blink-settings=imagesEnabled=false')
     chrome_options.add_argument('--disable-extensions')
     chrome_options.add_argument('--disable-plugins')
     chrome_options.add_argument('--disable-infobars')
     chrome_options.add_argument('--disable-notifications')
     chrome_options.add_argument('--disable-popup-blocking')
-    # Options pour éviter les crashes mémoire sur Railway
     chrome_options.add_argument('--disable-software-rasterizer')
     chrome_options.add_argument('--disable-setuid-sandbox')
     chrome_options.add_argument('--remote-debugging-port=9222')
@@ -41,9 +42,8 @@ def get_driver():
     chrome_options.add_argument('--safebrowsing-disable-auto-update')
     chrome_options.add_argument('--disable-renderer-backgrounding')
     chrome_options.add_argument('--disable-backgrounding-occluded-windows')
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
     
+    # Bloquer le chargement des ressources lourdes
     prefs = {
         "profile.managed_default_content_settings.images": 2,
         "profile.default_content_setting_values.notifications": 2,
@@ -54,11 +54,26 @@ def get_driver():
         "profile.managed_default_content_settings.popups": 2,
         "profile.managed_default_content_settings.geolocation": 2,
         "profile.managed_default_content_settings.media_stream": 2,
+        "disk-cache-size": 4096
     }
     chrome_options.add_experimental_option("prefs", prefs)
-    chrome_options.page_load_strategy = 'none'
+    chrome_options.page_load_strategy = 'eager'  # Ne pas attendre que tout charge (juste le DOM)
+    
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
     
     driver = webdriver.Chrome(options=chrome_options)
+    
+    # Bloquer les domaines de pub/tracking connus pour économiser la RAM
+    driver.execute_cdp_cmd('Network.setBlockedURLs', {
+        "urls": [
+            "*.doubleclick.net", "*.google-analytics.com", "*.facebook.com", 
+            "*.twitter.com", "*.googlesyndication.com", "*.criteo.com",
+            "*.moatads.com", "*.amazon-adsystem.com", "*.adnxs.com"
+        ]
+    })
+    driver.execute_cdp_cmd('Network.enable', {})
+    
     driver.execute_cdp_cmd('Network.setUserAgentOverride', {
         "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     })
