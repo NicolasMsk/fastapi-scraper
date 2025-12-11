@@ -41,9 +41,13 @@ def scrape_simplycodes_all(url: str) -> list:
         
         options = get_chrome_options()
         driver = webdriver.Chrome(options=options)
+        driver.set_page_load_timeout(30)
         driver.get(url)
         
-        time.sleep(3)
+        # Attendre que la page se charge avec WebDriverWait au lieu de sleep fixe
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='promotion-subtitle']"))
+        )
         print("[SimplyCodes ALL] Page chargée")
         
         # Trouver tous les boutons "Show Code"
