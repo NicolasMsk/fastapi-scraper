@@ -4,11 +4,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 import time
-import re
 
 
 def get_driver():
-    """Crée et retourne une instance du webdriver Chrome en mode headless"""
     chrome_options = Options()
     chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--disable-gpu')
@@ -20,10 +18,8 @@ def get_driver():
     chrome_options.add_argument('--disable-features=IsolateOrigins,site-per-process')
     chrome_options.add_argument('--ignore-certificate-errors')
     chrome_options.add_argument('--ignore-ssl-errors')
-    chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-    
-    # ⚡ OPTIMISATIONS DE VITESSE ⚡
-    chrome_options.add_argument('--blink-settings=imagesEnabled=false')  # Désactiver les images
+    chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+    chrome_options.add_argument('--blink-settings=imagesEnabled=false')
     chrome_options.add_argument('--disable-extensions')
     chrome_options.add_argument('--disable-plugins')
     chrome_options.add_argument('--disable-infobars')
@@ -32,7 +28,6 @@ def get_driver():
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
     
-    # Bloquer les ressources inutiles (CSS, fonts, etc.)
     prefs = {
         "profile.managed_default_content_settings.images": 2,
         "profile.default_content_setting_values.notifications": 2,
@@ -49,7 +44,7 @@ def get_driver():
     
     driver = webdriver.Chrome(options=chrome_options)
     driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-        "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     })
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     
@@ -57,7 +52,6 @@ def get_driver():
 
 
 def close_cookie_banner(driver, timeout=0.5):
-    """Ferme la bannière de cookies"""
     try:
         cookie_button = WebDriverWait(driver, timeout).until(
             EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Accept') or contains(text(), 'Consent')]"))
@@ -68,213 +62,145 @@ def close_cookie_banner(driver, timeout=0.5):
         pass
 
 
-def extract_code_from_copy_button(copy_button):
-    """Extrait le code du bouton COPY"""
-    try:
-        onclick_attr = copy_button.get_attribute("onclick")
-        if onclick_attr:
-            match = re.search(r"navigator\.clipboard\.writeText\(['\"]([A-Z0-9]+)['\"]\)", onclick_attr)
-            if match:
-                return match.group(1)
-        
-        click_attr = copy_button.get_attribute("@click")
-        if click_attr:
-            match = re.search(r"navigator\.clipboard\.writeText\(['\"]([A-Z0-9]+)['\"]\)", click_attr)
-            if match:
-                return match.group(1)
-        
-        for attr in [onclick_attr, click_attr]:
-            if attr:
-                match = re.search(r"writeText\(['\"]([^'\"]+)['\"]\)", attr)
-                if match:
-                    code = match.group(1).strip()
-                    if 3 <= len(code) <= 50:
-                        return code
-        
-        return None
-    except:
-        return None
-
-
-def extract_code_from_modal(driver, timeout=8):
-    """Extrait le code de la modal - VERSION ROBUSTE"""
-    try:
-        driver.execute_script("window.onbeforeunload = null;")
-    except:
-        pass
-    
-    # Attendre un peu plus que la modal soit chargée
-    time.sleep(1)
-    
-    # Essayer différents sélecteurs pour trouver le bouton copy
-    selectors = [
-        "//button[@data-component-class='copy_code']",
-        "//button[contains(@class, 'copy')]",
-        "//button[contains(text(), 'Copy')]",
-        "//button[contains(@data-code, '')]"
-    ]
-    
-    for selector in selectors:
-        try:
-            copy_button = WebDriverWait(driver, timeout).until(
-                EC.presence_of_element_located((By.XPATH, selector))
-            )
-            
-            code = extract_code_from_copy_button(copy_button)
-            if code:
-                return code
-        except:
-            continue
-    
-    # Si aucun bouton trouvé, essayer de chercher le code directement dans le DOM
-    try:
-        code_elements = driver.find_elements(By.XPATH, "//*[contains(@class, 'code') or contains(@data-code, '')]")
-        for elem in code_elements:
-            text = elem.text.strip()
-            if text and 3 <= len(text) <= 50:
-                return text
-    except:
-        pass
-    
-    return None
-
-
-def scrape_retailmenot_single(url, title):
+def scrape_retailmenot_all(url):
     """
-    Scrape un seul code RetailMeNot pour un titre donné
+    Scrape TOUS les codes promo d'une page RetailMeNot.
     
     Args:
-        url: URL de la page RetailMeNot
-        title: Titre de l'offre à chercher
+        url: URL de la page RetailMeNot (ex: https://www.retailmenot.com/view/asos.com)
     
     Returns:
-        Dict avec le statut et le code trouvé
+        Liste de dict avec tous les codes trouvés
     """
     driver = get_driver()
+    results = []
     
     try:
-        print(f"\n🔍 Chargement de: {url}")
-        original_window = driver.current_window_handle
+        print(f"[RetailMeNot] Accès à l'URL: {url}")
+        driver.get(url)
         
-        # Charger la page avec gestion d'erreur
-        try:
-            driver.get(url)
-        except Exception as e:
-            print(f"   ⚠️ Erreur de chargement (ignorée): {e}")
-        
-        # Attendre le minimum que le contenu se charge
-        time.sleep(1.5)
-        
-        # Arrêter le chargement immédiatement
+        time.sleep(2)
         try:
             driver.execute_script("window.stop();")
         except:
             pass
         
-        time.sleep(0.3)
+        time.sleep(1)
         close_cookie_banner(driver, timeout=0.5)
-        time.sleep(0.2)
         
-        # Chercher les offres
         offer_links = driver.find_elements(By.XPATH, "//a[@data-component-class='offer_strip']")
-        print(f"   🔎 {len(offer_links)} offres sur la page")
+        print(f"[RetailMeNot] {len(offer_links)} offres trouvées")
         
         if not offer_links:
-            return {
-                "success": False,
-                "code": None,
-                "title": title,
-                "message": "Aucune offre trouvée sur la page"
-            }
+            print("[RetailMeNot] Aucune offre trouvée")
+            return results
         
-        # Normaliser le titre cherché
-        target_normalized = ' '.join(title.lower().split())
-        matching_index = None
-
-        for i, offer in enumerate(offer_links):
-            try:
-                title_elem = offer.find_element(By.XPATH, ".//h3")
-                title_text = title_elem.text.strip()
-                title_normalized = ' '.join(title_text.lower().split())
-
-                if title_normalized == target_normalized:
-                    matching_index = i
-                    print(f"   ✅ Match exact trouvé: {title_text[:50]}")
-                    break
-            except:
+        original_window = driver.current_window_handle
+        original_windows = set(driver.window_handles)
+        
+        first_offer = offer_links[0]
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_offer)
+        time.sleep(0.5)
+        driver.execute_script("arguments[0].click();", first_offer)
+        print("[RetailMeNot] Premier clic pour révéler les codes...")
+        
+        time.sleep(3)
+        
+        new_windows = set(driver.window_handles)
+        new_tabs = new_windows - original_windows
+        
+        if new_tabs:
+            retailmenot_window = None
+            for new_window in new_tabs:
+                driver.switch_to.window(new_window)
+                current_url = driver.current_url
+                print(f"[RetailMeNot] Nouvel onglet: {current_url}")
+                
+                if "retailmenot" in current_url:
+                    retailmenot_window = new_window
+                    time.sleep(2)
+            
+            if retailmenot_window:
+                driver.switch_to.window(retailmenot_window)
+            else:
+                driver.switch_to.window(original_window)
+        
+        time.sleep(2)
+        
+        print("[RetailMeNot] Scroll de la page...")
+        last_height = driver.execute_script("return document.body.scrollHeight")
+        
+        while True:
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                break
+            last_height = new_height
+        
+        driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(1)
+        
+        print("[RetailMeNot] Récupération de tous les codes...")
+        
+        codes_data = driver.execute_script("""
+            var results = [];
+            var offers = document.querySelectorAll('a[data-component-class="offer_strip"]');
+            
+            offers.forEach(function(offer) {
+                var codeDiv = offer.querySelector('div.font-bold.tracking-wider');
+                var code = codeDiv ? codeDiv.textContent.trim() : null;
+                
+                var titleH3 = offer.querySelector('h3');
+                var title = titleH3 ? titleH3.textContent.trim() : null;
+                
+                if (code && title && code.length >= 3) {
+                    results.push({code: code, title: title});
+                }
+            });
+            
+            return results;
+        """)
+        
+        print(f"[RetailMeNot] {len(codes_data)} offres trouvées via JavaScript")
+        
+        for item in codes_data:
+            code = item['code']
+            if code.lower() in ['get deal', 'see deal', 'show deal', 'view deal']:
                 continue
-
-        if matching_index is None:
-            return {
-                "success": False,
-                "code": None,
-                "title": title,
-                "message": "Titre non trouvé sur la page"
-            }
-        
-        # Cliquer sur l'offre (LOGIQUE ORIGINALE QUI MARCHE)
-        offer_links_fresh = driver.find_elements(By.XPATH, "//a[@data-component-class='offer_strip']")
-        offer_to_click = offer_links_fresh[matching_index]
-        
-        driver.execute_script("arguments[0].scrollIntoView(true);", offer_to_click)
-        time.sleep(0.1)
-        driver.execute_script("arguments[0].click();", offer_to_click)
-        print(f"   🎯 Clic effectué sur l'offre")
-        
-        # Attendre le nouvel onglet (timeout plus long)
-        try:
-            WebDriverWait(driver, 10).until(lambda d: len(d.window_handles) > 1)
-        except:
-            return {
-                "success": False,
-                "code": None,
-                "title": title,
-                "message": "Aucun nouvel onglet détecté"
-            }
-        
-        # Passer au nouvel onglet
-        new_window = [w for w in driver.window_handles if w != original_window][0]
-        driver.switch_to.window(new_window)
-        print(f"   📱 Switché vers nouvel onglet")
-        
-        # Attendre plus longtemps que la modal se charge complètement
-        time.sleep(1.5)
-        
-        # Extraire le code et FINI !
-        print(f"   🔍 Recherche du code...")
-        code = extract_code_from_modal(driver, timeout=8)
-        
-        if code:
-            print(f"   ✅ CODE TROUVÉ: {code}")
-            return {
+                
+            results.append({
                 "success": True,
                 "code": code,
-                "title": title,
-                "message": "Code trouvé avec succès"
-            }
-        else:
-            return {
-                "success": False,
-                "code": None,
-                "title": title,
-                "message": "Code non trouvé dans la modal"
-            }
+                "title": item['title'],
+                "message": "Code extrait avec succès"
+            })
+            print(f"[RetailMeNot] {code} -> {item['title'][:50]}...")
+        
+        print(f"[RetailMeNot] Total: {len(results)} codes récupérés")
+        return results
         
     except Exception as e:
-        print(f"   ❌ Erreur: {e}")
-        return {
-            "success": False,
-            "code": None,
-            "title": title,
-            "message": f"Erreur lors du scraping: {str(e)}"
-        }
+        print(f"[RetailMeNot] Erreur: {str(e)}")
+        return results
     
     finally:
-        try:
-            # Nettoyer tous les onglets supplémentaires
-            for window in driver.window_handles[1:]:
-                driver.switch_to.window(window)
-                driver.close()
+        if driver:
             driver.quit()
-        except:
-            pass
+
+
+if __name__ == "__main__":
+    test_url = "https://www.retailmenot.com/view/asos.com"
+    
+    print("=" * 60)
+    print("TEST SCRAPER RETAILMENOT - TOUS LES CODES")
+    print("=" * 60)
+    
+    results = scrape_retailmenot_all(test_url)
+    
+    print("\n" + "=" * 60)
+    print(f"RÉSULTATS: {len(results)} codes trouvés")
+    print("=" * 60)
+    for i, result in enumerate(results):
+        print(f"  [{i+1}] Code: {result['code']} -> {result['title'][:50]}...")
+    print("=" * 60)

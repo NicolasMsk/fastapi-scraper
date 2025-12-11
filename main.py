@@ -1,13 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
-from typing import Optional
+from typing import Optional, List
 import uvicorn
 import time
 import requests
 
 from scraper_hotukdeals import scrape_hotukdeals_single
 from scraper_vouchercodes import scrape_vouchercodes_single
-from scraper_retailmenot import scrape_retailmenot_single
+from scraper_retailmenot import scrape_retailmenot_all
 
 app = FastAPI(
     title="Scraper API",
@@ -45,15 +45,13 @@ class ScrapeRequestVoucherCodes(BaseModel):
 
 
 class ScrapeRequestRetailMeNot(BaseModel):
-    """Modèle de requête pour le scraping RetailMeNot"""
-    title: str
+    """Modèle de requête pour le scraping RetailMeNot - TOUS les codes"""
     url: HttpUrl
     
     class Config:
         json_schema_extra = {
             "example": {
-                "title": "10% Off Stays",
-                "url": "https://www.retailmenot.com/view/dusit.com"
+                "url": "https://www.retailmenot.com/view/asos.com"
             }
         }
 
@@ -67,6 +65,22 @@ class ScrapeResponse(BaseModel):
     execution_time_seconds: Optional[float] = None
 
 
+class ScrapeResponseItem(BaseModel):
+    """Un code promo individuel"""
+    success: bool
+    code: str
+    title: str
+    message: str
+
+
+class ScrapeAllResponse(BaseModel):
+    """Modèle de réponse pour le scraping de tous les codes"""
+    success: bool
+    total_codes: int
+    codes: List[ScrapeResponseItem]
+    execution_time_seconds: float
+
+
 @app.get("/")
 async def root():
     """Page d'accueil de l'API"""
@@ -75,7 +89,7 @@ async def root():
         "endpoints": {
             "hotukdeals": "/scrape/hotukdeals",
             "vouchercodes": "/scrape/vouchercodes",
-            "retailmenot": "/scrape/retailmenot"
+            "retailmenot": "/scrape/retailmenot (récupère TOUS les codes)"
         },
         "documentation": "/docs"
     }
@@ -205,16 +219,20 @@ async def scrape_vouchercodes(request: ScrapeRequestVoucherCodes):
         )
 
 
-@app.post("/scrape/retailmenot", response_model=ScrapeResponse)
+@app.post("/scrape/retailmenot", response_model=ScrapeAllResponse)
 async def scrape_retailmenot(request: ScrapeRequestRetailMeNot):
     """
-    Scrape un code promo depuis RetailMeNot
+    Scrape TOUS les codes promo depuis une page RetailMeNot
     
     Args:
-        request: Objet contenant le titre et l'URL de l'offre
+        request: Objet contenant l'URL de la page RetailMeNot
     
     Returns:
-        Résultat du scraping avec le code trouvé (ou erreur)
+        Liste de tous les codes promo trouvés sur la page
+    
+    Example:
+        POST /scrape/retailmenot
+        {"url": "https://www.retailmenot.com/view/asos.com"}
     """
     start_time = time.time()
     try:
@@ -227,20 +245,18 @@ async def scrape_retailmenot(request: ScrapeRequestRetailMeNot):
                 detail="L'URL doit être une page RetailMeNot (retailmenot.com)"
             )
         
-        # Effectuer le scraping
-        result = scrape_retailmenot_single(url_str, request.title)
+        # Effectuer le scraping de TOUS les codes
+        results = scrape_retailmenot_all(url_str)
         
-        # Ajouter le temps d'exécution
+        # Calculer le temps d'exécution
         execution_time = round(time.time() - start_time, 2)
-        result["execution_time_seconds"] = execution_time
         
-        if not result["success"]:
-            raise HTTPException(
-                status_code=404,
-                detail=result["message"]
-            )
-        
-        return result
+        return ScrapeAllResponse(
+            success=len(results) > 0,
+            total_codes=len(results),
+            codes=results,
+            execution_time_seconds=execution_time
+        )
         
     except HTTPException:
         raise
