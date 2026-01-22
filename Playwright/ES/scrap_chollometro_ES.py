@@ -82,14 +82,18 @@ def scrape_chollometro_all(page, context, url):
         else:
             print(f"[Chollometro] Clic sur le premier code (titre non trouvé)")
         
-        with context.expect_page() as new_page_info:
-            first_btn.click()
-        
-        new_page = new_page_info.value
-        new_page.wait_for_load_state("domcontentloaded")
-        new_page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
-        
-        print("[Chollometro] Switché vers le nouvel onglet")
+        try:
+            with context.expect_page(timeout=15000) as new_page_info:
+                first_btn.click()
+            
+            new_page = new_page_info.value
+            new_page.wait_for_load_state("domcontentloaded", timeout=15000)
+            new_page.wait_for_timeout(1000)
+            
+            print("[Chollometro] Switché vers le nouvel onglet")
+        except PlaywrightTimeout:
+            print("[Chollometro] ⚠️ Timeout sur le premier onglet, abandon")
+            return results
         
         max_iterations = count + 5
         
@@ -197,17 +201,24 @@ def scrape_chollometro_all(page, context, url):
             next_btn = next_buttons.nth(current_index)
             try:
                 next_btn.scroll_into_view_if_needed()
-                new_page.wait_for_timeout(200)  # Réduit de 300 à 200
+                new_page.wait_for_timeout(200)
                 
-                with context.expect_page() as next_page_info:
-                    next_btn.click()
-                
-                next_new_page = next_page_info.value
-                next_new_page.wait_for_load_state("domcontentloaded")
-                print(f"[Chollometro] Switché vers nouvel onglet pour code {current_index + 1}")
-                new_page.close()
-                new_page = next_new_page
-                new_page.wait_for_timeout(500)  # Réduit de 1000 à 500
+                try:
+                    with context.expect_page(timeout=15000) as next_page_info:
+                        next_btn.click()
+                    
+                    next_new_page = next_page_info.value
+                    next_new_page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    print(f"[Chollometro] Switché vers nouvel onglet pour code {current_index + 1}")
+                    try:
+                        new_page.close()
+                    except:
+                        pass
+                    new_page = next_new_page
+                    new_page.wait_for_timeout(500)
+                except PlaywrightTimeout:
+                    print(f"[Chollometro] ⚠️ Timeout switch onglet {current_index + 1}, skip")
+                    continue
                 
             except Exception as e:
                 print(f"[Chollometro] Erreur clic suivant: {str(e)[:30]}")
