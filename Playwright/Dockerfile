@@ -10,18 +10,18 @@ ENV PORT=8080
 # Répertoire de travail
 WORKDIR /app
 
-# Copier requirements Playwright et installer dépendances Python
-COPY Playwright/requirements.txt .
+# Copier requirements et installer dépendances Python
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copier le dossier credentials
+# Copier le dossier credentials (doit être copié dans Playwright/ avant build)
 COPY credentials /app/credentials
 
 # Copier tout le code de Playwright/
-COPY Playwright/ /app/
+COPY . /app
 
 # Exposer le port Cloud Run
 EXPOSE 8080
 
-# Lancer FastAPI avec uvicorn - IMPORTANT: api_scraper:app
+# Lancer FastAPI avec uvicorn
 CMD ["uvicorn", "api_scraper:app", "--host", "0.0.0.0", "--port", "8080"]
