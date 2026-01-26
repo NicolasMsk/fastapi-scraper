@@ -275,9 +275,6 @@ def main():
     
     all_results = []
     
-    # Configuration pour éviter les crashes mémoire
-    PAGE_REFRESH_INTERVAL = 30  # Recréer la page tous les N merchants
-    
     print(f"\n🚀 Lancement de Playwright...")
     
     with sync_playwright() as p:
@@ -286,19 +283,12 @@ def main():
             viewport={"width": 1920, "height": 1080},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         )
-        page = context.new_page()
         
         for idx, (merchant_row, url) in enumerate(competitor_data, 1):
             merchant_slug = merchant_row.get('Merchant_slug', 'Unknown')
             
-            # Recréer la page périodiquement pour éviter les memory leaks
-            if idx > 1 and (idx - 1) % PAGE_REFRESH_INTERVAL == 0:
-                print(f"   🔄 Rafraîchissement de la page (prévention crash mémoire)...")
-                try:
-                    page.close()
-                except:
-                    pass
-                page = context.new_page()
+            # Créer une nouvelle page pour CHAQUE merchant (prévention crash mémoire max)
+            page = context.new_page()
             
             print(f"\n[{idx}/{len(competitor_data)}] 🏪 {merchant_slug}")
             print(f"   URL: {url[:60]}...")
@@ -338,6 +328,12 @@ def main():
                     else:
                         print(f"   ❌ Erreur: {error_msg[:50]}")
                         break  # Erreur non-crash, pas de retry
+            
+            # Fermer la page après chaque merchant (nettoyage mémoire maximal)
+            try:
+                page.close()
+            except:
+                pass
             
             print(f"   📝 Total: {len(all_results)} codes")
         
