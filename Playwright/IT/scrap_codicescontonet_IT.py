@@ -275,6 +275,9 @@ def main():
     
     all_results = []
     
+    # Configuration pour éviter les crashes mémoire
+    PAGE_REFRESH_INTERVAL = 30  # Recréer la page tous les N merchants
+    
     print(f"\n🚀 Lancement de Playwright...")
     
     with sync_playwright() as p:
@@ -288,27 +291,53 @@ def main():
         for idx, (merchant_row, url) in enumerate(competitor_data, 1):
             merchant_slug = merchant_row.get('Merchant_slug', 'Unknown')
             
+            # Recréer la page périodiquement pour éviter les memory leaks
+            if idx > 1 and (idx - 1) % PAGE_REFRESH_INTERVAL == 0:
+                print(f"   🔄 Rafraîchissement de la page (prévention crash mémoire)...")
+                try:
+                    page.close()
+                except:
+                    pass
+                page = context.new_page()
+            
             print(f"\n[{idx}/{len(competitor_data)}] 🏪 {merchant_slug}")
             print(f"   URL: {url[:60]}...")
             
-            try:
-                codes = scrape_codicescontonet_all(page, context, url)
-                print(f"   ✅ {len(codes)} codes trouvés")
-                
-                for code_info in codes:
-                    all_results.append({
-                        "Date": datetime.now().strftime("%Y-%m-%d"),
-                        "Country": "IT",
-                        "Merchant_ID": merchant_row.get("Merchant_ID", ""),
-                        "Merchant_slug": merchant_slug,
-                        "GPN_URL": merchant_row.get("GPN_URL", ""),
-                        "Competitor_Source": "codice-sconto.net",
-                        "Competitor_URL": url,
-                        "Code": code_info.get("code", ""),
-                        "Title": code_info.get("title", "")
-                    })
-            except Exception as e:
-                print(f"   ❌ Erreur: {str(e)[:50]}")
+            # Tentative avec retry en cas de crash
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    codes = scrape_codicescontonet_all(page, context, url)
+                    print(f"   ✅ {len(codes)} codes trouvés")
+                    
+                    for code_info in codes:
+                        all_results.append({
+                            "Date": datetime.now().strftime("%Y-%m-%d"),
+                            "Country": "IT",
+                            "Merchant_ID": merchant_row.get("Merchant_ID", ""),
+                            "Merchant_slug": merchant_slug,
+                            "GPN_URL": merchant_row.get("GPN_URL", ""),
+                            "Competitor_Source": "codice-sconto.net",
+                            "Competitor_URL": url,
+                            "Code": code_info.get("code", ""),
+                            "Title": code_info.get("title", "")
+                        })
+                    break  # Succès, sortir de la boucle retry
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    if "Page crashed" in error_msg or "Target closed" in error_msg:
+                        print(f"   ⚠️ Page crash détecté, tentative {attempt + 1}/{max_retries}...")
+                        try:
+                            page.close()
+                        except:
+                            pass
+                        page = context.new_page()
+                        if attempt == max_retries - 1:
+                            print(f"   ❌ Échec après {max_retries} tentatives")
+                    else:
+                        print(f"   ❌ Erreur: {error_msg[:50]}")
+                        break  # Erreur non-crash, pas de retry
             
             print(f"   📝 Total: {len(all_results)} codes")
         
