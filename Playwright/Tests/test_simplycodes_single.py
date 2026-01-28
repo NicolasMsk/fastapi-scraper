@@ -9,7 +9,8 @@ from playwright.sync_api import sync_playwright
 def scrape_simplycodes_test(page, context, url):
     """Test de scraping SimplyCodes - basé sur FastAPI - OPTIMISÉ"""
     results = []
-    
+    affiliate_link = None
+
     try:
         print(f"[SimplyCodes] Accès à l'URL: {url}")
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -50,8 +51,20 @@ def scrape_simplycodes_test(page, context, url):
         new_page = new_page_info.value
         new_page.wait_for_load_state("domcontentloaded")
         new_page.wait_for_timeout(1500)  # Réduit de 3000 à 1500
-        
+
         print(f"[SimplyCodes] Nouvel onglet ouvert: {new_page.url[:60]}...")
+
+        # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+        try:
+            for _ in range(10):
+                current_url = page.url
+                if "simplycodes" not in current_url.lower():
+                    affiliate_link = current_url
+                    print(f"[SimplyCodes] Lien affilié capturé: {affiliate_link[:60]}...")
+                    break
+                page.wait_for_timeout(500)
+        except Exception as e:
+            print(f"[SimplyCodes] ⚠️ Erreur capture affiliate: {str(e)[:40]}")
         
         # Récupérer le code depuis la popup
         popup_code = None
@@ -77,7 +90,7 @@ def scrape_simplycodes_test(page, context, url):
                     continue
             
             if popup_code and first_title:
-                results.append({"code": popup_code, "title": first_title})
+                results.append({"code": popup_code, "title": first_title, "affiliate_link": affiliate_link})
                 print(f"[SimplyCodes] ✅ AJOUTÉ (popup): {popup_code} -> {first_title[:50]}...")
             elif popup_code:
                 print(f"[SimplyCodes] ⚠️ Code trouvé mais pas de titre: {popup_code}")
@@ -130,7 +143,7 @@ def scrape_simplycodes_test(page, context, url):
             title = item.get('title')
             if code and title and code not in processed_codes:
                 processed_codes.add(code)
-                results.append({"code": code, "title": title})
+                results.append({"code": code, "title": title, "affiliate_link": affiliate_link})
                 print(f"[SimplyCodes] ✅ AJOUTÉ: {code} -> {title[:50]}...")
         
         # Fermer le nouvel onglet
@@ -170,13 +183,14 @@ def main():
         print("=" * 60)
         
         if results:
+            print(f"Affiliate Link: {results[0].get('affiliate_link', 'N/A')}\n")
             for i, r in enumerate(results, 1):
                 print(f"{i}. Code: {r['code']}")
                 print(f"   Titre: {r['title']}")
                 print()
         else:
             print("Aucun code trouvé")
-        
+
         print(f"Total: {len(results)} codes")
         
         browser.close()

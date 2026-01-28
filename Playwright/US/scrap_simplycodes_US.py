@@ -18,6 +18,7 @@ from gsheet_writer import append_to_gsheet
 def scrape_simplycodes_all(page, context, url):
     """Scrape tous les codes d'une page SimplyCodes - VERSION OPTIMISÉE"""
     results = []
+    affiliate_link = None
     
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -38,6 +39,17 @@ def scrape_simplycodes_all(page, context, url):
             new_page = new_page_info.value
             new_page.wait_for_load_state("domcontentloaded")
             new_page.wait_for_timeout(1000)
+            
+            # === CAPTURE AFFILIATE LINK ===
+            try:
+                for _ in range(10):
+                    current_url = page.url
+                    if "simplycodes" not in current_url:
+                        affiliate_link = current_url
+                        break
+                    page.wait_for_timeout(500)
+            except:
+                pass
         except:
             new_page = page
             new_page.wait_for_timeout(1000)
@@ -58,7 +70,7 @@ def scrape_simplycodes_all(page, context, url):
             }""")
             
             if popup_code and popup_title and popup_code not in ['Show Code', 'Copy', 'Copied!']:
-                results.append({"code": popup_code, "title": popup_title})
+                results.append({"code": popup_code, "title": popup_title, "affiliate_link": affiliate_link})
         except:
             pass
         
@@ -125,7 +137,7 @@ def scrape_simplycodes_all(page, context, url):
             title = item.get('title')
             if code and title and code not in seen:
                 seen.add(code)
-                results.append({"code": code, "title": title})
+                results.append({"code": code, "title": title, "affiliate_link": affiliate_link})
         
         # Fermer le nouvel onglet
         if new_page != page:
@@ -137,7 +149,7 @@ def scrape_simplycodes_all(page, context, url):
     except Exception as e:
         print(f"      ❌ Erreur: {str(e)[:50]}")
     
-    return results
+    return results, affiliate_link
 
 
 def main():
@@ -167,8 +179,10 @@ def main():
             print(f"   URL: {url[:60]}...")
             
             try:
-                codes = scrape_simplycodes_all(page, context, url)
+                codes, affiliate_link = scrape_simplycodes_all(page, context, url)
                 print(f"   ✅ {len(codes)} codes trouvés")
+                if affiliate_link:
+                    print(f"   🔗 Affiliate: {affiliate_link[:50]}...")
                 
                 for code_info in codes:
                     all_results.append({
@@ -179,6 +193,7 @@ def main():
                         "GPN_URL": merchant_row.get("GPN_URL", ""),
                         "Competitor_Source": "simplycodes",
                         "Competitor_URL": url,
+                        "Affiliate_Link": code_info.get("affiliate_link", ""),
                         "Code": code_info["code"],
                         "Title": code_info["title"]
                     })

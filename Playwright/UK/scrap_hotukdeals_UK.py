@@ -28,6 +28,7 @@ def scrape_hotukdeals_all(page, context, url):
     We only keep codes from the main merchant (with h3 = not expired)
     """
     results = []
+    affiliate_link = None
     
     try:
         # Navigate to page with domcontentloaded strategy
@@ -59,7 +60,7 @@ def scrape_hotukdeals_all(page, context, url):
         total_count = see_code_buttons.count()
         
         if total_count == 0:
-            return results
+            return results, affiliate_link
         
         print(f"      {total_count} valid codes found")
         
@@ -79,11 +80,26 @@ def scrape_hotukdeals_all(page, context, url):
         
         # Verify new tab opened
         if len(context.pages) <= pages_before:
-            return results
+            return results, affiliate_link
         
         # Switch to new tab
         new_page = context.pages[-1]
         new_page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
+        
+        # === CAPTURE AFFILIATE LINK ===
+        # La page originale se redirige vers le site marchand
+        try:
+            for _ in range(10):  # Max 5 secondes
+                current_url = page.url
+                if "hotukdeals" not in current_url:
+                    affiliate_link = current_url
+                    print(f"      🔗 Affiliate captured: {affiliate_link[:60]}...")
+                    break
+                page.wait_for_timeout(500)
+            if not affiliate_link:
+                print(f"      ⚠️ No affiliate link captured (page stayed on hotukdeals)")
+        except Exception as e:
+            print(f"      ⚠️ Error capturing affiliate: {str(e)[:30]}")
         
         # === STEP 2: Loop through all codes on new tab ===
         max_iterations = min(total_count + 5, 25)
@@ -136,7 +152,7 @@ def scrape_hotukdeals_all(page, context, url):
                 if code and current_title and code not in processed_codes and current_title not in processed_titles:
                     processed_codes.add(code)
                     processed_titles.add(current_title)
-                    results.append({"code": code, "title": current_title})
+                    results.append({"code": code, "title": current_title, "affiliate_link": affiliate_link})
                 
                 # STEP 3: Close the popup
                 try:
@@ -191,7 +207,7 @@ def scrape_hotukdeals_all(page, context, url):
     except Exception as e:
         print(f"      ❌ Error: {str(e)[:50]}")
     
-    return results
+    return results, affiliate_link
 
 
 def main():
@@ -221,8 +237,10 @@ def main():
             print(f"   URL: {url[:60]}...")
             
             try:
-                codes = scrape_hotukdeals_all(page, context, url)
+                codes, affiliate_link = scrape_hotukdeals_all(page, context, url)
                 print(f"   ✅ {len(codes)} codes found")
+                if affiliate_link:
+                    print(f"   🔗 Affiliate: {affiliate_link[:50]}...")
                 
                 for code_info in codes:
                     all_results.append({
@@ -233,6 +251,7 @@ def main():
                         "GPN_URL": merchant_row.get("GPN_URL", ""),
                         "Competitor_Source": "hotukdeals",
                         "Competitor_URL": url,
+                        "Affiliate_Link": code_info.get("affiliate_link", ""),
                         "Code": code_info["code"],
                         "Title": code_info["title"]
                     })

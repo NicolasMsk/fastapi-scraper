@@ -10,7 +10,8 @@ from playwright.sync_api import sync_playwright
 def scrape_igraal_test(page, context, url):
     """Test de scraping iGraal - même logique que RetailMeNot"""
     results = []
-    
+    affiliate_link = None
+
     try:
         print(f"[iGraal] Accès à l'URL: {url}")
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -48,7 +49,19 @@ def scrape_igraal_test(page, context, url):
             new_page = new_page_info.value
             new_page.wait_for_load_state("domcontentloaded")
             page.wait_for_timeout(2000)
-            
+
+            # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+            try:
+                for _ in range(10):
+                    current_url = page.url
+                    if "igraal" not in current_url.lower():
+                        affiliate_link = current_url
+                        print(f"[iGraal] Lien affilié capturé: {affiliate_link[:60]}...")
+                        break
+                    page.wait_for_timeout(500)
+            except Exception as e:
+                print(f"[iGraal] ⚠️ Erreur capture affiliate: {str(e)[:40]}")
+
             # Vérifier si c'est une page igraal
             if "igraal" in new_page.url:
                 work_page = new_page
@@ -154,7 +167,7 @@ def scrape_igraal_test(page, context, url):
             
             if code and title:
                 processed_codes.add(code)
-                results.append({"code": code, "title": title})
+                results.append({"code": code, "title": title, "affiliate_link": affiliate_link})
                 print(f"[iGraal] ✅ AJOUTÉ: {code} -> {title[:50]}...")
         
         # Fermer le nouvel onglet si on en a ouvert un
@@ -197,13 +210,14 @@ def main():
     print("=" * 60)
     
     if results:
+        print(f"Affiliate Link: {results[0].get('affiliate_link', 'N/A')}\n")
         for i, r in enumerate(results, 1):
             print(f"{i}. Code: {r['code']}")
             print(f"   Titre: {r['title']}")
             print()
     else:
         print("Aucun code trouvé")
-    
+
     print(f"Total: {len(results)} codes uniques")
 
 

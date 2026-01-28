@@ -163,13 +163,13 @@ def append_to_gsheet(results: list, source_name: str = None, skip_cleaning: bool
         spreadsheet = client.open_by_key(MISSING_CODE_SPREADSHEET_ID)
         worksheet = spreadsheet.worksheet(MISSING_CODE_SHEET_NAME)
         
-        # Colonnes attendues dans l'ordre
+        # Colonnes attendues dans l'ordre (doit correspondre au spreadsheet)
         columns = [
             "Date", "Country", "Merchant_ID", "Merchant_slug", "GPN_URL",
-            "Competitor_Source", "Competitor_URL", "Code", "Title",
+            "Competitor_Source", "Competitor_URL", "Affiliate_Link", "Code", "Title",
             "Actioned by", "Comments"
         ]
-        
+
         # Préparer les lignes à ajouter
         rows_to_add = []
         for result in results:
@@ -181,6 +181,7 @@ def append_to_gsheet(results: list, source_name: str = None, skip_cleaning: bool
                 result.get("GPN_URL", ""),
                 result.get("Competitor_Source", ""),
                 result.get("Competitor_URL", ""),
+                result.get("Affiliate_Link", ""),  # Affiliate_Link entre Competitor_URL et Code
                 result.get("Code", ""),
                 result.get("Title", ""),
                 "",  # Actioned by - laissé vide pour remplissage manuel

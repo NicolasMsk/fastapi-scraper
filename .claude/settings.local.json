@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gcloud.cmd run jobs list:*)",
+      "Bash(dir /b \"c:\\\\Users\\\\nmusicki\\\\Documents\\\\Python_Scripts\\\\scrap_code\\\\Playwright\")",
+      "Bash(gcloud.cmd run jobs describe:*)",
+      "Bash(gcloud.cmd run jobs update:*)",
+      "Bash(gcloud.cmd run jobs execute:*)",
+      "Bash(powershell -Command \"Start-Sleep -Seconds 30; gcloud.cmd logging read ''resource.type=cloud_run_job AND resource.labels.job_name=scraper-uk-vouchercodes'' --limit=50 --format=''value\\(textPayload\\)'' --freshness=3m\")"
+    ]
+  }
+}

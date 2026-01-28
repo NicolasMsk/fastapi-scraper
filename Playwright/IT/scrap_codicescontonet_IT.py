@@ -27,6 +27,7 @@ def scrape_codicescontonet_all(page, context, url):
     5. Répéter
     """
     results = []
+    affiliate_link = None
     
     try:
         print(f"[CodiceSconto] Accès à l'URL: {url}")
@@ -129,6 +130,20 @@ def scrape_codicescontonet_all(page, context, url):
         new_page = context.pages[-1]
         print("[CodiceSconto] Switché vers le nouvel onglet")
         new_page.wait_for_timeout(2000)
+        
+        # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+        try:
+            for _ in range(10):
+                current_url = page.url
+                if "codice-sconto" not in current_url.lower():
+                    affiliate_link = current_url
+                    print(f"[CodiceSconto] 🔗 Affiliate captured: {affiliate_link[:60]}...")
+                    break
+                page.wait_for_timeout(500)
+            if not affiliate_link:
+                print(f"[CodiceSconto] ⚠️ No affiliate link captured (page stayed on codice-sconto)")
+        except Exception as e:
+            print(f"[CodiceSconto] ⚠️ Error capturing affiliate: {str(e)[:30]}")
         
         # === ÉTAPE 2: Boucle sur le nouvel onglet ===
         max_iterations = 30
@@ -262,7 +277,7 @@ def scrape_codicescontonet_all(page, context, url):
     except Exception as e:
         print(f"[CodiceSconto] ❌ Erreur générale: {str(e)[:50]}")
     
-    return results
+    return results, affiliate_link
 
 
 def main():
@@ -297,7 +312,7 @@ def main():
             max_retries = 2
             for attempt in range(max_retries):
                 try:
-                    codes = scrape_codicescontonet_all(page, context, url)
+                    codes, affiliate_link = scrape_codicescontonet_all(page, context, url)
                     print(f"   ✅ {len(codes)} codes trouvés")
                     
                     for code_info in codes:
@@ -309,6 +324,7 @@ def main():
                             "GPN_URL": merchant_row.get("GPN_URL", ""),
                             "Competitor_Source": "codice-sconto.net",
                             "Competitor_URL": url,
+                            "Affiliate_Link": affiliate_link or "",
                             "Code": code_info.get("code", ""),
                             "Title": code_info.get("title", "")
                         })

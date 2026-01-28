@@ -13,6 +13,7 @@ from playwright.sync_api import sync_playwright
 def test_mydealz_single(url):
     """Test scraping sur une seule URL MyDealz"""
     results = []
+    affiliate_link = None
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -66,7 +67,22 @@ def test_mydealz_single(url):
             else:
                 work_page = page
                 print(f"[MyDealz] Pas de nouvel onglet, on reste sur la page")
-            
+
+            # === CAPTURE DU LIEN AFFILIÉ ===
+            # La page originale se redirige vers le site marchand
+            try:
+                for _ in range(10):  # Max 5 secondes
+                    current_url = page.url
+                    if "mydealz.de" not in current_url:
+                        affiliate_link = current_url
+                        print(f"[MyDealz] ✅ Affiliate link: {affiliate_link[:80]}...")
+                        break
+                    page.wait_for_timeout(500)
+                if not affiliate_link:
+                    print(f"[MyDealz] ⚠️ Pas de lien affilié capturé (page restée sur mydealz)")
+            except Exception as e:
+                print(f"[MyDealz] ⚠️ Erreur capture affiliate: {e}")
+
             # === ÉTAPE 2: Boucle sur work_page ===
             max_iterations = 20
             
@@ -106,7 +122,8 @@ def test_mydealz_single(url):
                     processed_codes.add(code)
                     results.append({
                         "code": code,
-                        "title": current_title
+                        "title": current_title,
+                        "affiliate_link": affiliate_link
                     })
                     print(f"[MyDealz] ✅ Ajouté: {code}")
                 
@@ -172,15 +189,18 @@ def main():
     print("\n" + "=" * 60)
     print("RÉSULTATS FINAUX")
     print("=" * 60)
-    
+
     if results:
+        if results[0].get("affiliate_link"):
+            print(f"🔗 Affiliate Link: {results[0]['affiliate_link']}")
+            print("-" * 60)
         for i, r in enumerate(results, 1):
             print(f"{i}. Code: {r['code']}")
             print(f"   Titre: {r['title']}")
             print()
     else:
         print("Aucun code trouvé")
-    
+
     print(f"Total: {len(results)} codes uniques")
 
 

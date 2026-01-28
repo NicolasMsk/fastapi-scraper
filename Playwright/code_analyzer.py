@@ -12,6 +12,10 @@ import os
 import json
 from datetime import datetime
 from openai import OpenAI
+from dotenv import load_dotenv
+
+# Charger les variables d'environnement depuis .env
+load_dotenv()
 
 # ===================================================================
 # CONFIGURATION
@@ -20,8 +24,8 @@ from openai import OpenAI
 # Format du nom du spreadsheet avec la date du jour
 SPREADSHEET_NAME_FORMAT = "Missing_Deals_Coupons_{date}"  # {date} sera remplacé par MM_DD_YYYY
 
-# Liste des sheets pays à traiter
-COUNTRY_SHEETS = ["UK", "US", "AU", "DE", "ES", "FR", "IT"]
+# Liste des sheets pays à traiter (US exclu)
+COUNTRY_SHEETS = ["UK", "AU", "DE", "ES", "FR", "IT"]
 
 # Chemin des credentials Google Sheets
 _local_path = os.path.join(os.path.dirname(__file__), "..", "credentials", "service_account.json")
@@ -37,45 +41,10 @@ SCOPES = [
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 # ===================================================================
-# LLM PROMPT
+# TITLE REWRITING RULES
 # ===================================================================
 
-ANALYSIS_PROMPT = """You are an expert promo code analyst. Your task is to analyze coupon/promo codes and:
-1. CLASSIFY the code reliability into one of 3 categories
-2. REWRITE the title following strict guidelines
-
-## INPUT DATA:
-- Merchant: {merchant_slug}
-- Country: {country}
-- Promo Code: {code}
-- Original Title: {title}
-- Source: {source}
-
-## CLASSIFICATION CATEGORIES:
-
-Analyze the code pattern, title wording, and context to determine reliability:
-
-**CATEGORY A - HIGH RELIABILITY** (Likely Valid):
-- Generic discount codes (e.g., SAVE10, WELCOME20, FIRST15)
-- Seasonal/event codes (e.g., SUMMER2024, BLACKFRIDAY, XMAS25)
-- Clear percentage or dollar amounts in title
-- Standard promo patterns (NEW, VIP, MEMBER, STUDENT, SENIOR)
-- Codes matching common brand patterns
-
-**CATEGORY B - MEDIUM RELIABILITY** (Possibly Valid):
-- Codes with unusual patterns but plausible
-- Ambiguous titles that could be real offers
-- Older looking codes that might still work
-- Codes with mixed signals (some good, some concerning patterns)
-
-**CATEGORY C - LOW RELIABILITY** (Likely Invalid/Spam):
-- Competitor affiliate codes (containing names like HONEY, RAKUTEN, RETAILMENOT, etc.)
-- Codes that look auto-generated or random
-- Titles that are vague, generic, or don't mention a specific offer
-- Codes with "exclusive" partner names embedded
-- Suspicious patterns (all caps random strings, very long codes)
-- Titles in different language than expected for the country
-
+REWRITE_RULES = """
 ## TITLE REWRITING RULES:
 
 **🚫 NEVER DO:**
@@ -101,16 +70,6 @@ Analyze the code pattern, title wording, and context to determine reliability:
 
 If the original title already contains good value info, extract and front-load it.
 If the title is vague, infer the likely offer from the code pattern and create a compelling title.
-
-## OUTPUT FORMAT:
-
-Respond with ONLY a valid JSON object (no markdown, no explanation):
-{{
-    "category": "A" | "B" | "C",
-    "category_reason": "Brief 1-sentence explanation of classification",
-    "rewritten_title": "Your rewritten title here (max 100 chars)",
-    "title_approach": "action" | "benefit" | "value"
-}}
 """
 
 
@@ -150,13 +109,13 @@ def find_todays_spreadsheet(client):
 
 def ensure_llm_columns(worksheet):
     """
-    Ajoute les colonnes LLM_Category et Rewritten_Title après la colonne Title si elles n'existent pas.
+    Ajoute les colonnes Rewritten_Title et Spam_Code après la colonne Title si elles n'existent pas.
     
     Args:
         worksheet: Objet worksheet gspread
     
     Returns:
-        tuple: (title_col_index, category_col_index, rewritten_title_col_index)
+        tuple: (title_col_index, rewritten_title_col_index, spam_code_col_index)
     """
     header = worksheet.row_values(1)
     
@@ -166,29 +125,39 @@ def ensure_llm_columns(worksheet):
     except ValueError:
         raise ValueError("Colonne 'Title' non trouvée dans le header")
     
-    # Vérifier si les colonnes LLM existent déjà
-    category_col = title_idx + 1
-    rewritten_title_col = title_idx + 2
+    # Vérifier si les colonnes existent déjà
+    rewritten_title_col = title_idx + 1
+    spam_code_col = title_idx + 2
     
-    needs_update = False
+    cols_to_add = []
     
-    if len(header) < category_col or header[category_col - 1] != "LLM_Category":
-        needs_update = True
-    
+    # Vérifier Rewritten_Title
     if len(header) < rewritten_title_col or header[rewritten_title_col - 1] != "Rewritten_Title":
-        needs_update = True
+        cols_to_add.append("Rewritten_Title")
     
-    if needs_update:
-        print(f"   📝 Ajout des colonnes LLM après 'Title' (col {title_idx})")
-        
-        # Insérer 2 colonnes après Title
-        worksheet.insert_cols(values=[["LLM_Category"], ["Rewritten_Title"]], col=category_col)
-        
-        print(f"   ✅ Colonnes ajoutées: LLM_Category (col {category_col}), Rewritten_Title (col {rewritten_title_col})")
+    # Re-lire le header après potentielle insertion
+    if cols_to_add:
+        print(f"   📝 Ajout des colonnes après 'Title' (col {title_idx})")
+        worksheet.insert_cols(values=[[col] for col in cols_to_add], col=rewritten_title_col)
+        header = worksheet.row_values(1)  # Re-lire le header
+        print(f"   ✅ Colonne ajoutée: Rewritten_Title (col {rewritten_title_col})")
+    
+    # Vérifier Spam_Code (après Rewritten_Title)
+    header = worksheet.row_values(1)
+    try:
+        rewritten_title_col = header.index("Rewritten_Title") + 1
+        spam_code_col = rewritten_title_col + 1
+    except ValueError:
+        pass
+    
+    if len(header) < spam_code_col or header[spam_code_col - 1] != "Spam_Code":
+        print(f"   📝 Ajout de la colonne Spam_Code (col {spam_code_col})")
+        worksheet.insert_cols(values=[["Spam_Code"]], col=spam_code_col)
+        print(f"   ✅ Colonne ajoutée: Spam_Code (col {spam_code_col})")
     else:
         print(f"   ✅ Colonnes LLM déjà présentes")
     
-    return title_idx, category_col, rewritten_title_col
+    return title_idx, rewritten_title_col, spam_code_col
 
 
 def get_missing_codes(worksheet, batch_size: int = 100):
@@ -205,13 +174,13 @@ def get_missing_codes(worksheet, batch_size: int = 100):
     print(f"📥 Récupération des données de la sheet '{worksheet.title}'...")
     
     # S'assurer que les colonnes LLM existent
-    title_idx, category_col, rewritten_title_col = ensure_llm_columns(worksheet)
+    title_idx, rewritten_title_col, spam_code_col = ensure_llm_columns(worksheet)
     
     all_records = worksheet.get_all_records()
     
-    # Filtrer uniquement ceux qui n'ont PAS encore été traités (pas de catégorie)
-    unprocessed = [r for r in all_records if not r.get("LLM_Category")]
-    print(f"   📝 {len(unprocessed)} codes non analysés sur {len(all_records)} au total")
+    # Filtrer uniquement ceux qui n'ont PAS encore été traités (pas de Rewritten_Title)
+    unprocessed = [r for r in all_records if not r.get("Rewritten_Title")]
+    print(f"   📝 {len(unprocessed)} codes non traités sur {len(all_records)} au total")
     
     # Prendre seulement le batch_size demandé
     batch = unprocessed[:batch_size]
@@ -224,13 +193,13 @@ def get_missing_codes(worksheet, batch_size: int = 100):
         try:
             original_index = all_records.index(record)
             record["_row_index"] = original_index + 2  # +2 pour header et 1-based
-            record["_category_col"] = category_col
             record["_rewritten_col"] = rewritten_title_col
+            record["_spam_col"] = spam_code_col
             batch_with_index.append(record)
         except ValueError:
             continue
     
-    print(f"📊 Batch de {len(batch_with_index)} codes à analyser")
+    print(f"📊 Batch de {len(batch_with_index)} codes à traiter")
     return batch_with_index
 
 
@@ -243,69 +212,136 @@ def get_missing_codes_OLD(batch_size: int = 100, filter_today: bool = True):
     return [], None
 
 
-def analyze_code_with_llm(record: dict, client: OpenAI) -> dict:
+def analyze_batch_with_llm(records: list, client: OpenAI, country: str) -> list:
     """
-    Analyse un code promo avec le LLM.
+    Réécrit les titres d'un batch en une seule requête LLM.
     
     Args:
-        record: Dictionnaire avec les données du code
+        records: Liste de dictionnaires avec les données des codes
         client: Client OpenAI
+        country: Code pays (UK, US, AU, DE, ES, FR, IT) pour la langue
     
     Returns:
-        Dictionnaire avec category et rewritten_title
+        Liste de dictionnaires avec id et rewritten_title pour chaque code
+    
+    Raises:
+        Exception: Si l'API échoue (pas de fallback)
     """
-    prompt = ANALYSIS_PROMPT.format(
-        merchant_slug=record.get("Merchant_slug", "Unknown"),
-        country=record.get("Country", "Unknown"),
-        code=record.get("Code", ""),
-        title=record.get("Title", ""),
-        source=record.get("Competitor_Source", "Unknown")
+    # Mapper les pays aux langues
+    COUNTRY_LANGUAGES = {
+        "UK": "English",
+        "US": "English", 
+        "AU": "English",
+        "DE": "German",
+        "ES": "Spanish",
+        "FR": "French",
+        "IT": "Italian"
+    }
+    language = COUNTRY_LANGUAGES.get(country, "English")
+    
+    # Construire le prompt avec uniquement les données essentielles
+    codes_data = []
+    for idx, record in enumerate(records, 1):
+        codes_data.append({
+            "id": idx,
+            "code": record.get("Code", ""),
+            "title": record.get("Title", "")
+        })
+    
+    batch_prompt = f"""Rewrite {len(codes_data)} promo code titles in {language} following these rules:
+
+{REWRITE_RULES}
+
+IMPORTANT: All rewritten titles MUST be in {language}.
+
+Also, for each code, determine if it's a SPAM/FAKE code:
+- spam_code = true if: affiliate codes (HONEY, RAKUTEN, etc.), random strings, auto-generated codes, competitor codes
+- spam_code = false if: looks like a legitimate promo code
+
+TITLES TO REWRITE:
+{json.dumps(codes_data)}
+
+RESPOND WITH JSON ARRAY ONLY:
+[{{"id":1,"rewritten_title":"...in {language}...","spam_code":false}},...]
+"""
+    
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": f"Rewrite titles in {language} and detect spam codes. JSON array only."},
+            {"role": "user", "content": batch_prompt}
+        ],
+        temperature=0.3,
+        max_tokens=min(len(records) * 50, 16000)  # ~50 tokens par titre, max 16000
     )
     
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a promo code analyst. Always respond with valid JSON only."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=300
-        )
+    result_text = response.choices[0].message.content.strip()
+    
+    # Nettoyer si le LLM ajoute des backticks markdown
+    if result_text.startswith("```"):
+        result_text = result_text.split("```")[1]
+        if result_text.startswith("json"):
+            result_text = result_text[4:]
+    result_text = result_text.strip()
+    
+    results = json.loads(result_text)
+    
+    # Vérifier que le nombre de résultats correspond
+    if len(results) != len(records):
+        raise ValueError(f"Expected {len(records)} results, got {len(results)}")
+    
+    return results
+
+
+def analyze_all_codes(records: list, country: str) -> list:
+    """
+    Réécrit les titres du batch en UNE SEULE requête LLM.
+    
+    Args:
+        records: Liste des codes à traiter
+        country: Code pays pour la langue (UK, DE, ES, FR, IT, etc.)
+    
+    Returns:
+        Liste de résultats avec les données originales + titre réécrit
+    """
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY environment variable not set!")
+    
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    
+    print(f"\n🤖 Réécriture de {len(records)} titres avec GPT-4o-mini...")
+    
+    # Traiter tout le batch en une seule fois
+    analyses = analyze_batch_with_llm(records, client, country)
+    
+    # Associer les résultats aux records originaux
+    results = []
+    for idx, record in enumerate(records):
+        # Trouver l'analyse correspondante par ID
+        analysis = next((a for a in analyses if a.get("id") == idx + 1), None)
         
-        result_text = response.choices[0].message.content.strip()
-        
-        # Nettoyer si le LLM ajoute des backticks markdown
-        if result_text.startswith("```"):
-            result_text = result_text.split("```")[1]
-            if result_text.startswith("json"):
-                result_text = result_text[4:]
-        result_text = result_text.strip()
-        
-        result = json.loads(result_text)
-        return result
-        
-    except json.JSONDecodeError as e:
-        print(f"   ⚠️ JSON parse error: {e}")
-        return {
-            "category": "B",
-            "category_reason": "Failed to parse LLM response",
-            "rewritten_title": record.get("Title", "")[:100],
-            "title_approach": "value"
-        }
-    except Exception as e:
-        print(f"   ❌ LLM error: {e}")
-        return None
+        if analysis:
+            result = {
+                "original_data": record,
+                "analysis": analysis
+            }
+            results.append(result)
+            print(f"   [{idx+1}/{len(records)}] {record.get('Title', '')[:40]} → {analysis['rewritten_title'][:40]}")
+        else:
+            print(f"   [{idx+1}/{len(records)}] ❌ No result for code {idx+1}")
+    
+    print(f"   ✅ Batch de {len(results)} titres réécrits")
+    return results
 
 
 def update_sheet_with_results(worksheet, results: list):
     """
-    Met à jour le Google Sheet avec les résultats de l'analyse.
-    Met à jour UNIQUEMENT les 2 colonnes LLM ajoutées après Title.
+    Met à jour le Google Sheet avec les titres réécrits.
+    Met à jour les colonnes Rewritten_Title et Spam_Code.
     
     Args:
         worksheet: Objet worksheet gspread
-        results: Liste des résultats d'analyse
+        results: Liste des résultats
     """
     print("\n📝 Mise à jour du Google Sheet...")
     
@@ -314,10 +350,10 @@ def update_sheet_with_results(worksheet, results: list):
     
     for r in results:
         row_index = r["original_data"].get("_row_index")
-        category_col = r["original_data"].get("_category_col")
         rewritten_col = r["original_data"].get("_rewritten_col")
+        spam_col = r["original_data"].get("_spam_col")
         
-        if not row_index or not category_col or not rewritten_col:
+        if not row_index or not rewritten_col:
             continue
         
         analysis = r["analysis"]
@@ -325,17 +361,21 @@ def update_sheet_with_results(worksheet, results: list):
         # Convertir les indices de colonnes en lettres (A, B, C, etc.)
         from gspread.utils import rowcol_to_a1
         
-        category_cell = rowcol_to_a1(row_index, category_col)
+        # Rewritten_Title
         rewritten_cell = rowcol_to_a1(row_index, rewritten_col)
-        
-        updates.append({
-            "range": category_cell,
-            "values": [[analysis["category"]]]
-        })
         updates.append({
             "range": rewritten_cell,
             "values": [[analysis["rewritten_title"]]]
         })
+        
+        # Spam_Code
+        if spam_col:
+            spam_cell = rowcol_to_a1(row_index, spam_col)
+            spam_value = "True" if analysis.get("spam_code", False) else "False"
+            updates.append({
+                "range": spam_cell,
+                "values": [[spam_value]]
+            })
     
     # Faire le batch update
     if updates:
@@ -343,50 +383,6 @@ def update_sheet_with_results(worksheet, results: list):
         print(f"   ✅ {len(results)} lignes mises à jour dans la sheet '{worksheet.title}'")
     else:
         print("   ⚠️ Aucune ligne à mettre à jour")
-
-
-def analyze_all_codes(records: list, batch_size: int = 10) -> list:
-    """
-    Analyse tous les codes avec le LLM.
-    
-    Args:
-        records: Liste des codes à analyser
-        batch_size: Nombre de codes par batch (pour affichage)
-    
-    Returns:
-        Liste de résultats avec les données originales + analyse
-    """
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY environment variable not set!")
-    
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    results = []
-    
-    print(f"\n🤖 Analyse de {len(records)} codes avec GPT-4o-mini...")
-    
-    for idx, record in enumerate(records, 1):
-        merchant = record.get("Merchant_slug", "Unknown")
-        code = record.get("Code", "")
-        
-        print(f"[{idx}/{len(records)}] {merchant} - {code[:20]}...", end=" ")
-        
-        analysis = analyze_code_with_llm(record, client)
-        
-        if analysis:
-            result = {
-                "original_data": record,
-                "analysis": analysis
-            }
-            results.append(result)
-            print(f"→ Cat {analysis['category']}")
-        else:
-            print("→ ❌ Failed")
-        
-        # Progress indicator
-        if idx % batch_size == 0:
-            print(f"   📊 Progress: {idx}/{len(records)} ({idx*100//len(records)}%)")
-    
-    return results
 
 
 def save_results_json(results: list, output_path: str = None):
@@ -419,20 +415,12 @@ def save_results_json(results: list, output_path: str = None):
             "country": r["original_data"].get("Country"),
             "code": r["original_data"].get("Code"),
             "original_title": r["original_data"].get("Title"),
-            "category": r["analysis"]["category"],
-            "category_reason": r["analysis"]["category_reason"],
-            "rewritten_title": r["analysis"]["rewritten_title"],
-            "title_approach": r["analysis"]["title_approach"]
+            "rewritten_title": r["analysis"]["rewritten_title"]
         })
     
     output_data = {
         "generated_at": datetime.now().isoformat(),
         "total_codes": len(formatted_results),
-        "category_counts": {
-            "A": sum(1 for r in formatted_results if r["category"] == "A"),
-            "B": sum(1 for r in formatted_results if r["category"] == "B"),
-            "C": sum(1 for r in formatted_results if r["category"] == "C")
-        },
         "results": formatted_results
     }
     
@@ -445,29 +433,18 @@ def save_results_json(results: list, output_path: str = None):
 
 def print_summary(results: list):
     """Affiche un résumé des résultats."""
-    categories = {"A": 0, "B": 0, "C": 0}
-    
-    for r in results:
-        cat = r["analysis"]["category"]
-        if cat in categories:
-            categories[cat] += 1
-    
     total = len(results)
     
     print(f"\n{'='*60}")
-    print("📊 RÉSUMÉ DE L'ANALYSE")
+    print("📊 RÉSUMÉ")
     print(f"{'='*60}")
-    print(f"Total codes analysés: {total}")
-    print(f"")
-    print(f"🟢 Catégorie A (High Reliability):   {categories['A']:4d} ({categories['A']*100//total if total else 0}%)")
-    print(f"🟡 Catégorie B (Medium Reliability): {categories['B']:4d} ({categories['B']*100//total if total else 0}%)")
-    print(f"🔴 Catégorie C (Low Reliability):    {categories['C']:4d} ({categories['C']*100//total if total else 0}%)")
+    print(f"Total titres réécrits: {total}")
     print(f"{'='*60}")
 
 
 def main(batch_size: int = 100, countries: list = None):
     """
-    Fonction principale - traite tous les pays sheet par sheet.
+    Fonction principale - traite les codes par pays (sheet par sheet).
     
     Args:
         batch_size: Nombre de codes par batch (défaut: 100)
@@ -514,11 +491,14 @@ def main(batch_size: int = 100, countries: list = None):
             records = get_missing_codes(worksheet, batch_size=batch_size)
             
             if not records:
-                print(f"✅ Tous les codes de {country} ont été analysés!")
+                if batch_num == 1:
+                    print(f"✅ {country} déjà complètement traité - skip")
+                else:
+                    print(f"✅ Tous les codes de {country} ont été traités!")
                 break
             
-            # 2. Analyser avec le LLM
-            results = analyze_all_codes(records)
+            # 2. Réécrire les titres avec le LLM (dans la bonne langue)
+            results = analyze_all_codes(records, country)
             
             # 3. Mettre à jour le sheet immédiatement
             update_sheet_with_results(worksheet, results)

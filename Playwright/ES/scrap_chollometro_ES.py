@@ -26,6 +26,7 @@ def scrape_chollometro_all(page, context, url):
     5. Répéter jusqu'à avoir tous les codes
     """
     results = []
+    affiliate_link = None
     
     try:
         print(f"[Chollometro] Accès à l'URL: {url}")
@@ -90,6 +91,20 @@ def scrape_chollometro_all(page, context, url):
             new_page.wait_for_load_state("domcontentloaded", timeout=15000)
             new_page.wait_for_timeout(1000)
             
+            # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+            try:
+                for _ in range(10):
+                    current_url = page.url
+                    if "chollometro" not in current_url.lower():
+                        affiliate_link = current_url
+                        print(f"[Chollometro] 🔗 Affiliate captured: {affiliate_link[:60]}...")
+                        break
+                    page.wait_for_timeout(500)
+                if not affiliate_link:
+                    print(f"[Chollometro] ⚠️ No affiliate link captured (page stayed on chollometro)")
+            except Exception as e:
+                print(f"[Chollometro] ⚠️ Error capturing affiliate: {str(e)[:30]}")
+
             print("[Chollometro] Switché vers le nouvel onglet")
         except PlaywrightTimeout:
             print("[Chollometro] ⚠️ Timeout sur le premier onglet, abandon")
@@ -234,7 +249,7 @@ def scrape_chollometro_all(page, context, url):
     except Exception as e:
         print(f"[Chollometro] ❌ Erreur générale: {str(e)[:50]}")
     
-    return results
+    return results, affiliate_link
 
 
 def main():
@@ -246,6 +261,9 @@ def main():
     print(f"📍 Chollometro: {len(competitor_data)} URLs uniques")
     
     all_results = []
+    
+    # Configuration pour éviter les "Page crashed"
+    PAGE_REFRESH_INTERVAL = 25
     
     print(f"\n🚀 Lancement de Playwright...")
     
@@ -260,27 +278,63 @@ def main():
         for idx, (merchant_row, url) in enumerate(competitor_data, 1):
             merchant_slug = merchant_row.get('Merchant_slug', 'Unknown')
             
+            # Recréer la page périodiquement
+            if idx > 1 and (idx - 1) % PAGE_REFRESH_INTERVAL == 0:
+                print(f"\n🔄 Refresh de la page (prévention memory leak)...")
+                try:
+                    page.close()
+                except:
+                    pass
+                for p_tab in context.pages:
+                    try:
+                        p_tab.close()
+                    except:
+                        pass
+                page = context.new_page()
+            
             print(f"\n[{idx}/{len(competitor_data)}] 🏪 {merchant_slug}")
             print(f"   URL: {url[:60]}...")
             
-            try:
-                codes = scrape_chollometro_all(page, context, url)
-                print(f"   ✅ {len(codes)} codes trouvés")
-                
-                for code_info in codes:
-                    all_results.append({
-                        "Date": datetime.now().strftime("%Y-%m-%d"),
-                        "Country": "ES",
-                        "Merchant_ID": merchant_row.get("Merchant_ID", ""),
-                        "Merchant_slug": merchant_slug,
-                        "GPN_URL": merchant_row.get("GPN_URL", ""),
-                        "Competitor_Source": "chollometro",
-                        "Competitor_URL": url,
-                        "Code": code_info.get("code", ""),
-                        "Title": code_info.get("title", "")
-                    })
-            except Exception as e:
-                print(f"   ❌ Erreur: {str(e)[:50]}")
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    codes, affiliate_link = scrape_chollometro_all(page, context, url)
+                    print(f"   ✅ {len(codes)} codes trouvés")
+                    
+                    for code_info in codes:
+                        all_results.append({
+                            "Date": datetime.now().strftime("%Y-%m-%d"),
+                            "Country": "ES",
+                            "Merchant_ID": merchant_row.get("Merchant_ID", ""),
+                            "Merchant_slug": merchant_slug,
+                            "GPN_URL": merchant_row.get("GPN_URL", ""),
+                            "Competitor_Source": "chollometro",
+                            "Competitor_URL": url,
+                            "Affiliate_Link": affiliate_link or "",
+                            "Code": code_info.get("code", ""),
+                            "Title": code_info.get("title", "")
+                        })
+                    break
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    if "Page crashed" in error_msg or "Target closed" in error_msg:
+                        print(f"   ⚠️ Page crashed (attempt {attempt + 1}/{max_retries}), recréation...")
+                        try:
+                            page.close()
+                        except:
+                            pass
+                        for p_tab in context.pages:
+                            try:
+                                p_tab.close()
+                            except:
+                                pass
+                        page = context.new_page()
+                        if attempt == max_retries - 1:
+                            print(f"   ❌ Échec après {max_retries} tentatives")
+                    else:
+                        print(f"   ❌ Erreur: {error_msg[:50]}")
+                        break
             
             print(f"   📝 Total: {len(all_results)} codes")
         

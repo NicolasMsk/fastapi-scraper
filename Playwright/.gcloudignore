@@ -1,0 +1,20 @@
+# Ignore output files
+Output/
+
+# Ignore cache
+__pycache__/
+*.pyc
+
+# Ignore tests
+Tests/
+
+# Ignore env files
+.env
+*.env
+
+# Ignore git
+.git/
+.gitignore
+
+# Keep credentials
+!credentials/

@@ -8,7 +8,8 @@ from playwright.sync_api import sync_playwright
 def test_cuponation_au_single(url):
     """Test scraping sur une seule URL Cuponation AU"""
     results = []
-    
+    affiliate_link = None
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)  # headless=False pour voir ce qui se passe
         context = browser.new_context(
@@ -88,7 +89,19 @@ def test_cuponation_au_single(url):
             
             print("[Cuponation AU] Switché vers le nouvel onglet")
             new_page.wait_for_timeout(1500)  # Optimisé: 2000 -> 1500
-            
+
+            # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+            try:
+                for _ in range(10):
+                    current_url = page.url
+                    if "cuponation" not in current_url.lower():
+                        affiliate_link = current_url
+                        print(f"[Cuponation AU] Lien affilié capturé: {affiliate_link[:60]}...")
+                        break
+                    page.wait_for_timeout(500)
+            except Exception as e:
+                print(f"[Cuponation AU] ⚠️ Erreur capture affiliate: {str(e)[:40]}")
+
             # === ÉTAPE 2: Boucle sur le nouvel onglet ===
             max_iterations = min(total_count + 5, 25)
             
@@ -138,7 +151,8 @@ def test_cuponation_au_single(url):
                     processed_codes.add(code)
                     results.append({
                         "code": code,
-                        "title": current_title
+                        "title": current_title,
+                        "affiliate_link": affiliate_link
                     })
                     print(f"[Cuponation AU] ✅ Code: {code} -> {current_title[:40]}...")
                 else:
@@ -221,6 +235,8 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print(f"RÉSULTATS: {len(results)} codes trouvés")
     print("=" * 60)
+    if results:
+        print(f"Affiliate Link: {results[0].get('affiliate_link', 'N/A')}\n")
     for i, r in enumerate(results):
         print(f"  [{i+1}] Code: {r['code']} -> {r['title'][:50]}...")
     print("=" * 60)

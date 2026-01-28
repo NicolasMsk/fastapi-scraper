@@ -31,6 +31,7 @@ def scrape_cuponation_it_all(page, context, url):
     8. Répéter jusqu'à avoir tous les codes
     """
     results = []
+    affiliate_link = None
     
     try:
         print(f"[CuponationIT] Accès à l'URL: {url}")
@@ -100,6 +101,20 @@ def scrape_cuponation_it_all(page, context, url):
         new_page = new_page_info.value
         new_page.wait_for_load_state("domcontentloaded")
         new_page.wait_for_timeout(2000)
+        
+        # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+        try:
+            for _ in range(10):
+                current_url = page.url
+                if "cuponation" not in current_url.lower():
+                    affiliate_link = current_url
+                    print(f"[CuponationIT] 🔗 Affiliate captured: {affiliate_link[:60]}...")
+                    break
+                page.wait_for_timeout(500)
+            if not affiliate_link:
+                print(f"[CuponationIT] ⚠️ No affiliate link captured (page stayed on cuponation)")
+        except Exception as e:
+            print(f"[CuponationIT] ⚠️ Error capturing affiliate: {str(e)[:30]}")
         
         print("[CuponationIT] Switché vers le nouvel onglet")
         
@@ -244,7 +259,7 @@ def scrape_cuponation_it_all(page, context, url):
     except Exception as e:
         print(f"[CuponationIT] ❌ Erreur générale: {str(e)[:50]}")
     
-    return results
+    return results, affiliate_link
 
 
 def main():
@@ -274,7 +289,7 @@ def main():
             print(f"   URL: {url[:60]}...")
             
             try:
-                codes = scrape_cuponation_it_all(page, context, url)
+                codes, affiliate_link = scrape_cuponation_it_all(page, context, url)
                 print(f"   ✅ {len(codes)} codes trouvés")
                 
                 for code_info in codes:
@@ -286,6 +301,7 @@ def main():
                         "GPN_URL": merchant_row.get("GPN_URL", ""),
                         "Competitor_Source": "cuponation_it",
                         "Competitor_URL": url,
+                        "Affiliate_Link": affiliate_link or "",
                         "Code": code_info.get("code", ""),
                         "Title": code_info.get("title", "")
                     })

@@ -24,6 +24,7 @@ def scrape_mydealz_all(page, context, url):
     Chaque clic ouvre un nouvel onglet → switch → récupérer code → fermer → répéter
     """
     results = []
+    affiliate_link = None
     
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -43,7 +44,7 @@ def scrape_mydealz_all(page, context, url):
         total_count = see_code_buttons.count()
         
         if total_count == 0:
-            return results
+            return results, affiliate_link
         
         processed_codes = set()
         
@@ -61,6 +62,21 @@ def scrape_mydealz_all(page, context, url):
             work_page = context.pages[-1]
         else:
             work_page = page
+
+        # === CAPTURE DU LIEN AFFILIÉ ===
+        # La page ORIGINALE se redirige vers le site marchand
+        try:
+            for _ in range(10):  # Max 5 secondes
+                current_url = page.url
+                if "mydealz" not in current_url.lower():
+                    affiliate_link = current_url
+                    print(f"      🔗 Affiliate captured: {affiliate_link[:60]}...")
+                    break
+                page.wait_for_timeout(500)
+            if not affiliate_link:
+                print(f"      ⚠️ No affiliate link captured (page stayed on mydealz)")
+        except Exception as e:
+            print(f"      ⚠️ Error capturing affiliate: {str(e)[:30]}")
         
         # === ÉTAPE 2: Boucle sur work_page ===
         max_iterations = 50
@@ -97,7 +113,8 @@ def scrape_mydealz_all(page, context, url):
                 processed_codes.add(code)
                 results.append({
                     "code": code,
-                    "title": current_title
+                    "title": current_title,
+                    "affiliate_link": affiliate_link
                 })
             
             # 3. Fermer la popup avec CloseIcon
@@ -137,7 +154,7 @@ def scrape_mydealz_all(page, context, url):
     except Exception as e:
         print(f"[MyDealz] Erreur: {str(e)[:50]}")
     
-    return results
+    return results, affiliate_link
 
 
 def main():
@@ -171,8 +188,11 @@ def main():
             print(f"   URL: {url[:60]}...")
             
             try:
-                codes = scrape_mydealz_all(page, context, url)
-                
+                codes, affiliate_link = scrape_mydealz_all(page, context, url)
+                print(f"   ✅ {len(codes)} codes trouvés")
+                if affiliate_link:
+                    print(f"   🔗 Affiliate: {affiliate_link[:50]}...")
+
                 for code_info in codes:
                     all_results.append({
                         "Date": datetime.now().strftime("%Y-%m-%d"),
@@ -182,15 +202,16 @@ def main():
                         "GPN_URL": merchant_row.get("GPN_URL", ""),
                         "Competitor_Source": "mydealz",
                         "Competitor_URL": url,
+                        "Affiliate_Link": code_info.get("affiliate_link", ""),
                         "Code": code_info["code"],
                         "Title": code_info["title"]
                     })
                 
-                print(f"   → {len(codes)} codes trouvés")
-                
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")
-            
+
+            print(f"   📝 Total: {len(all_results)} codes")
+
             # Fermer les onglets popup éventuels (garder la page principale)
             while len(context.pages) > 1:
                 context.pages[-1].close()

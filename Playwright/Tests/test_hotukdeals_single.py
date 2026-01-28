@@ -8,6 +8,7 @@ from playwright.sync_api import sync_playwright
 def test_hotukdeals_single(url):
     """Test scraping sur une seule URL HotUKDeals"""
     results = []
+    affiliate_link = None
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)  # headless=False pour voir ce qui se passe
@@ -90,7 +91,20 @@ def test_hotukdeals_single(url):
             new_page = context.pages[-1]
             print("[HotUKDeals] Switché vers le nouvel onglet")
             new_page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
-            
+
+            # === CAPTURE DU LIEN AFFILIÉ ===
+            # La page originale se redirige vers le site marchand
+            try:
+                for _ in range(10):  # Max 5 secondes
+                    current_url = page.url
+                    if "hotukdeals.com" not in current_url:
+                        affiliate_link = current_url
+                        print(f"[HotUKDeals] ✅ Affiliate link: {affiliate_link[:80]}...")
+                        break
+                    page.wait_for_timeout(500)
+            except Exception as e:
+                print(f"[HotUKDeals] ⚠️ Erreur capture affiliate: {e}")
+
             # === ÉTAPE 2: Boucle sur le nouvel onglet ===
             max_iterations = 20
             
@@ -162,7 +176,8 @@ def test_hotukdeals_single(url):
                     processed_codes.add(code)
                     results.append({
                         "code": code,
-                        "title": current_title or f"Offre {len(results)+1}"
+                        "title": current_title or f"Offre {len(results)+1}",
+                        "affiliate_link": affiliate_link
                     })
                     print(f"[HotUKDeals] ✅ Code: {code} -> {current_title[:40] if current_title else 'N/A'}...")
                 else:
@@ -248,6 +263,9 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print(f"RÉSULTATS: {len(results)} codes trouvés")
     print("=" * 60)
+    if results and results[0].get("affiliate_link"):
+        print(f"🔗 Affiliate Link: {results[0]['affiliate_link']}")
+        print("-" * 60)
     for i, r in enumerate(results):
         print(f"  [{i+1}] Code: {r['code']} -> {r['title'][:50]}...")
     print("=" * 60)

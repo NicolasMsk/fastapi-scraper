@@ -23,6 +23,7 @@ def scrape_mareduc_all(page, context, url):
     puis récupérer via JavaScript.
     """
     results = []
+    affiliate_link = None
     
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -58,7 +59,21 @@ def scrape_mareduc_all(page, context, url):
             new_page = new_page_info.value
             new_page.wait_for_load_state("domcontentloaded")
             page.wait_for_timeout(2000)
-            
+
+            # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+            try:
+                for _ in range(10):
+                    current_url = page.url
+                    if "ma-reduc" not in current_url.lower():
+                        affiliate_link = current_url
+                        print(f"[Ma-Reduc] 🔗 Affiliate captured: {affiliate_link[:60]}...")
+                        break
+                    page.wait_for_timeout(500)
+                if not affiliate_link:
+                    print(f"[Ma-Reduc] ⚠️ No affiliate link captured (page stayed on ma-reduc)")
+            except Exception as e:
+                print(f"[Ma-Reduc] ⚠️ Error capturing affiliate: {str(e)[:30]}")
+
             # Vérifier si c'est une page ma-reduc
             if "ma-reduc" in new_page.url:
                 work_page = new_page
@@ -171,7 +186,7 @@ def scrape_mareduc_all(page, context, url):
     except Exception as e:
         print(f"      ❌ Erreur: {str(e)[:50]}")
     
-    return results
+    return results, affiliate_link
 
 
 def main():
@@ -179,7 +194,7 @@ def main():
     print(f"📖 Chargement depuis Google Sheets...")
     
     # Charger les URLs depuis Google Sheets
-    competitor_data = get_competitor_urls("FR", "mareduc")
+    competitor_data = get_competitor_urls("FR", "ma-reduc")
     print(f"📍 Ma-Reduc: {len(competitor_data)} URLs uniques")
     
     all_results = []
@@ -201,7 +216,7 @@ def main():
             print(f"   URL: {url[:60]}...")
             
             try:
-                codes = scrape_mareduc_all(page, context, url)
+                codes, affiliate_link = scrape_mareduc_all(page, context, url)
                 print(f"   ✅ {len(codes)} codes trouvés")
                 
                 for code_info in codes:
@@ -213,6 +228,7 @@ def main():
                         "GPN_URL": merchant_row.get("GPN_URL", ""),
                         "Competitor_Source": "mareduc",
                         "Competitor_URL": url,
+                        "Affiliate_Link": affiliate_link or "",
                         "Code": code_info["code"],
                         "Title": code_info["title"]
                     })

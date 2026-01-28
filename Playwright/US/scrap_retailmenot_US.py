@@ -21,6 +21,7 @@ def scrape_retailmenot_all(page, context, url):
     Même logique que le scraper FastAPI.
     """
     results = []
+    affiliate_link = None
     
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -52,6 +53,17 @@ def scrape_retailmenot_all(page, context, url):
             new_page = new_page_info.value
             new_page.wait_for_load_state("domcontentloaded")
             page.wait_for_timeout(2000)
+            
+            # === CAPTURE AFFILIATE LINK ===
+            try:
+                for _ in range(10):
+                    current_url = page.url
+                    if "retailmenot" not in current_url:
+                        affiliate_link = current_url
+                        break
+                    page.wait_for_timeout(500)
+            except:
+                pass
             
             # Vérifier si c'est une page RetailMeNot
             if "retailmenot" in new_page.url:
@@ -119,7 +131,8 @@ def scrape_retailmenot_all(page, context, url):
                 processed_codes.add(code)
                 results.append({
                     "code": code,
-                    "title": title
+                    "title": title,
+                    "affiliate_link": affiliate_link
                 })
         
         # Fermer le nouvel onglet si on en a ouvert un
@@ -132,7 +145,7 @@ def scrape_retailmenot_all(page, context, url):
     except Exception as e:
         print(f"      ❌ Erreur: {str(e)[:50]}")
     
-    return results
+    return results, affiliate_link
 
 
 def main():
@@ -162,8 +175,10 @@ def main():
             print(f"   URL: {url[:60]}...")
             
             try:
-                codes = scrape_retailmenot_all(page, context, url)
+                codes, affiliate_link = scrape_retailmenot_all(page, context, url)
                 print(f"   ✅ {len(codes)} codes trouvés")
+                if affiliate_link:
+                    print(f"   🔗 Affiliate: {affiliate_link[:50]}...")
                 
                 for code_info in codes:
                     all_results.append({
@@ -174,6 +189,7 @@ def main():
                         "GPN_URL": merchant_row.get("GPN_URL", ""),
                         "Competitor_Source": "retailmenot",
                         "Competitor_URL": url,
+                        "Affiliate_Link": code_info.get("affiliate_link", ""),
                         "Code": code_info["code"],
                         "Title": code_info["title"]
                     })

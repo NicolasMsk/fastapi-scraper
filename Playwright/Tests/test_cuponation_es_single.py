@@ -52,8 +52,9 @@ def test_cuponation_es_single():
             print("[TEST] ❌ Aucun bouton trouvé!")
             browser.close()
             return []
-        
+
         results = []
+        affiliate_link = None
         processed_codes = set()
         processed_titles = set()
         max_codes = 5
@@ -72,6 +73,18 @@ def test_cuponation_es_single():
         new_page.wait_for_load_state("domcontentloaded")
         new_page.wait_for_timeout(1500)  # Optimisé: 2000 -> 1500
         print(f"[TEST] Nouvel onglet ouvert, URL: {new_page.url[:60]}...")
+
+        # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+        try:
+            for _ in range(10):
+                current_url = page.url
+                if "cuponation" not in current_url.lower():
+                    affiliate_link = current_url
+                    print(f"[TEST] Lien affilié capturé: {affiliate_link[:60]}...")
+                    break
+                page.wait_for_timeout(500)
+        except Exception as e:
+            print(f"[TEST] ⚠️ Erreur capture affiliate: {str(e)[:40]}")
         
         # Boucle d'extraction (comme le ALL)
         for iteration in range(max_codes):
@@ -152,7 +165,7 @@ def test_cuponation_es_single():
             if code and current_title and len(code) >= 3 and code not in processed_codes and current_title not in processed_titles:
                 processed_codes.add(code)
                 processed_titles.add(current_title)
-                results.append({"code": code, "title": current_title})
+                results.append({"code": code, "title": current_title, "affiliate_link": affiliate_link})
                 print(f"[TEST] ✅ AJOUTÉ: {code}")
             else:
                 reasons = []
@@ -257,5 +270,7 @@ def test_cuponation_es_single():
 if __name__ == "__main__":
     codes = test_cuponation_es_single()
     print("\n--- RÉSULTATS ---")
+    if codes:
+        print(f"Affiliate Link: {codes[0].get('affiliate_link', 'N/A')}\n")
     for i, c in enumerate(codes, 1):
         print(f"{i}. {c['code']} | {c['title'][:60]}...")

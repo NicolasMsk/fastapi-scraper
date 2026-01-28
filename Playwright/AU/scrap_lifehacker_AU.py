@@ -156,6 +156,7 @@ def main():
                         "GPN_URL": merchant_row.get("GPN_URL", ""),
                         "Competitor_Source": "lifehacker",
                         "Competitor_URL": url,
+                        "Affiliate_Link": "",
                         "Code": code_info.get("code", ""),
                         "Title": code_info.get("title", "")
                     })
