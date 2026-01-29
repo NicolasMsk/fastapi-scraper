@@ -86,15 +86,23 @@ def scrape_hotukdeals_all(page, context, url):
         new_page = context.pages[-1]
         new_page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
         
-        # === CAPTURE AFFILIATE LINK ===
-        # La page originale se redirige vers le site marchand
+        # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+        # Attend jusqu'à 10 secondes et vérifie que l'URL est stable (1.5s)
         try:
-            for _ in range(10):  # Max 5 secondes
+            last_url = None
+            stable_count = 0
+            for _ in range(20):  # Max 10 secondes
                 current_url = page.url
-                if "hotukdeals" not in current_url:
-                    affiliate_link = current_url
-                    print(f"      🔗 Affiliate captured: {affiliate_link[:60]}...")
-                    break
+                if "hotukdeals" not in current_url.lower():
+                    if current_url == last_url:
+                        stable_count += 1
+                        if stable_count >= 3:  # URL stable pendant 1.5 secondes
+                            affiliate_link = current_url
+                            print(f"      🔗 Affiliate captured: {affiliate_link[:60]}...")
+                            break
+                    else:
+                        stable_count = 0
+                        last_url = current_url
                 page.wait_for_timeout(500)
             if not affiliate_link:
                 print(f"      ⚠️ No affiliate link captured (page stayed on hotukdeals)")

@@ -40,16 +40,28 @@ def scrape_simplycodes_all(page, context, url):
             new_page.wait_for_load_state("domcontentloaded")
             new_page.wait_for_timeout(1000)
             
-            # === CAPTURE AFFILIATE LINK ===
+            # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+            # Attend jusqu'à 10 secondes et vérifie que l'URL est stable (1.5s)
             try:
-                for _ in range(10):
+                last_url = None
+                stable_count = 0
+                for _ in range(20):  # Max 10 secondes
                     current_url = page.url
-                    if "simplycodes" not in current_url:
-                        affiliate_link = current_url
-                        break
+                    if "simplycodes" not in current_url.lower():
+                        if current_url == last_url:
+                            stable_count += 1
+                            if stable_count >= 3:  # URL stable pendant 1.5 secondes
+                                affiliate_link = current_url
+                                print(f"[SimplyCodes] 🔗 Affiliate captured: {affiliate_link[:60]}...")
+                                break
+                        else:
+                            stable_count = 0
+                            last_url = current_url
                     page.wait_for_timeout(500)
-            except:
-                pass
+                if not affiliate_link:
+                    print(f"[SimplyCodes] ⚠️ No affiliate link captured (page stayed on simplycodes)")
+            except Exception as e:
+                print(f"[SimplyCodes] ⚠️ Error capturing affiliate: {str(e)[:30]}")
         except:
             new_page = page
             new_page.wait_for_timeout(1000)

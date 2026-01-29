@@ -1,8 +1,8 @@
 """
-Script pour analyser et classifier les codes promo avec un LLM.
-- Lit les données depuis Google Sheets (Missing_Code)
-- Classifie chaque code en 3 catégories de fiabilité
+Script pour analyser les codes promo avec un LLM.
+- Lit les données depuis Google Sheets (Missing_Deals_Coupons)
 - Réécrit les titres selon les guidelines
+- Extrait le Network depuis le lien affilié
 - Output en JSON
 """
 
@@ -109,82 +109,85 @@ def find_todays_spreadsheet(client):
 
 def ensure_llm_columns(worksheet):
     """
-    Ajoute les colonnes Rewritten_Title et Spam_Code après la colonne Title si elles n'existent pas.
-    
+    Ajoute les colonnes Rewritten_Title (après Title) et Network (après Affiliate_Link) si elles n'existent pas.
+
     Args:
         worksheet: Objet worksheet gspread
-    
+
     Returns:
-        tuple: (title_col_index, rewritten_title_col_index, spam_code_col_index)
+        tuple: (title_col_index, rewritten_title_col_index, network_col_index)
     """
     header = worksheet.row_values(1)
-    
+
     # Trouver l'index de la colonne Title
     try:
         title_idx = header.index("Title") + 1  # +1 car gspread utilise 1-based indexing
     except ValueError:
         raise ValueError("Colonne 'Title' non trouvée dans le header")
-    
-    # Vérifier si les colonnes existent déjà
-    rewritten_title_col = title_idx + 1
-    spam_code_col = title_idx + 2
-    
-    cols_to_add = []
-    
-    # Vérifier Rewritten_Title
-    if len(header) < rewritten_title_col or header[rewritten_title_col - 1] != "Rewritten_Title":
-        cols_to_add.append("Rewritten_Title")
-    
-    # Re-lire le header après potentielle insertion
-    if cols_to_add:
-        print(f"   📝 Ajout des colonnes après 'Title' (col {title_idx})")
-        worksheet.insert_cols(values=[[col] for col in cols_to_add], col=rewritten_title_col)
-        header = worksheet.row_values(1)  # Re-lire le header
-        print(f"   ✅ Colonne ajoutée: Rewritten_Title (col {rewritten_title_col})")
-    
-    # Vérifier Spam_Code (après Rewritten_Title)
-    header = worksheet.row_values(1)
+
+    # Trouver l'index de la colonne Affiliate_Link
     try:
-        rewritten_title_col = header.index("Rewritten_Title") + 1
-        spam_code_col = rewritten_title_col + 1
+        affiliate_idx = header.index("Affiliate_Link") + 1
     except ValueError:
-        pass
-    
-    if len(header) < spam_code_col or header[spam_code_col - 1] != "Spam_Code":
-        print(f"   📝 Ajout de la colonne Spam_Code (col {spam_code_col})")
-        worksheet.insert_cols(values=[["Spam_Code"]], col=spam_code_col)
-        print(f"   ✅ Colonne ajoutée: Spam_Code (col {spam_code_col})")
+        raise ValueError("Colonne 'Affiliate_Link' non trouvée dans le header")
+
+    # Vérifier et ajouter Rewritten_Title (après Title)
+    rewritten_title_col = title_idx + 1
+    if len(header) < rewritten_title_col or header[rewritten_title_col - 1] != "Rewritten_Title":
+        print(f"   📝 Ajout de la colonne Rewritten_Title (col {rewritten_title_col})")
+        worksheet.insert_cols(values=[["Rewritten_Title"]], col=rewritten_title_col)
+        header = worksheet.row_values(1)  # Re-lire le header
+        print(f"   ✅ Colonne ajoutée: Rewritten_Title")
+        # Mettre à jour affiliate_idx car on a inséré une colonne avant
+        affiliate_idx = header.index("Affiliate_Link") + 1
+
+    # Re-lire le header pour être sûr d'avoir les bons indices
+    header = worksheet.row_values(1)
+    rewritten_title_col = header.index("Rewritten_Title") + 1
+    affiliate_idx = header.index("Affiliate_Link") + 1
+
+    # Vérifier et ajouter Network (juste après Affiliate_Link)
+    network_col = affiliate_idx + 1
+    if len(header) < network_col or header[network_col - 1] != "Network":
+        print(f"   📝 Ajout de la colonne Network (col {network_col})")
+        worksheet.insert_cols(values=[["Network"]], col=network_col)
+        print(f"   ✅ Colonne ajoutée: Network")
     else:
         print(f"   ✅ Colonnes LLM déjà présentes")
-    
-    return title_idx, rewritten_title_col, spam_code_col
+
+    # Re-lire le header final
+    header = worksheet.row_values(1)
+    rewritten_title_col = header.index("Rewritten_Title") + 1
+    network_col = header.index("Network") + 1
+
+    return title_idx, rewritten_title_col, network_col
 
 
 def get_missing_codes(worksheet, batch_size: int = 100):
     """
     Récupère les codes depuis une worksheet spécifique.
-    
+
     Args:
         worksheet: Objet worksheet gspread
         batch_size: Nombre de lignes à récupérer par batch (défaut: 100)
-    
+
     Returns:
         Liste de dictionnaires avec les données + row_index + col_indices
     """
     print(f"📥 Récupération des données de la sheet '{worksheet.title}'...")
-    
+
     # S'assurer que les colonnes LLM existent
-    title_idx, rewritten_title_col, spam_code_col = ensure_llm_columns(worksheet)
-    
+    title_idx, rewritten_title_col, network_col = ensure_llm_columns(worksheet)
+
     all_records = worksheet.get_all_records()
-    
+
     # Filtrer uniquement ceux qui n'ont PAS encore été traités (pas de Rewritten_Title)
     unprocessed = [r for r in all_records if not r.get("Rewritten_Title")]
     print(f"   📝 {len(unprocessed)} codes non traités sur {len(all_records)} au total")
-    
+
     # Prendre seulement le batch_size demandé
     batch = unprocessed[:batch_size]
-    
+
     # Ajouter l'index de ligne pour pouvoir updater plus tard
     # (row_index = position dans la sheet, +2 car header + index 1-based)
     batch_with_index = []
@@ -194,43 +197,34 @@ def get_missing_codes(worksheet, batch_size: int = 100):
             original_index = all_records.index(record)
             record["_row_index"] = original_index + 2  # +2 pour header et 1-based
             record["_rewritten_col"] = rewritten_title_col
-            record["_spam_col"] = spam_code_col
+            record["_network_col"] = network_col
             batch_with_index.append(record)
         except ValueError:
             continue
-    
+
     print(f"📊 Batch de {len(batch_with_index)} codes à traiter")
     return batch_with_index
 
 
-def get_missing_codes_OLD(batch_size: int = 100, filter_today: bool = True):
-    """
-    ANCIENNE VERSION - Récupère les codes depuis la sheet Missing_Code.
-    Conservée pour référence uniquement.
-    """
-    print("⚠️ Utilisation de l'ancienne fonction - deprecated")
-    return [], None
-
-
 def analyze_batch_with_llm(records: list, client: OpenAI, country: str) -> list:
     """
-    Réécrit les titres d'un batch en une seule requête LLM.
-    
+    Réécrit les titres et extrait les networks d'un batch en une seule requête LLM.
+
     Args:
         records: Liste de dictionnaires avec les données des codes
         client: Client OpenAI
         country: Code pays (UK, US, AU, DE, ES, FR, IT) pour la langue
-    
+
     Returns:
-        Liste de dictionnaires avec id et rewritten_title pour chaque code
-    
+        Liste de dictionnaires avec id, rewritten_title et network pour chaque code
+
     Raises:
         Exception: Si l'API échoue (pas de fallback)
     """
     # Mapper les pays aux langues
     COUNTRY_LANGUAGES = {
         "UK": "English",
-        "US": "English", 
+        "US": "English",
         "AU": "English",
         "DE": "German",
         "ES": "Spanish",
@@ -238,145 +232,149 @@ def analyze_batch_with_llm(records: list, client: OpenAI, country: str) -> list:
         "IT": "Italian"
     }
     language = COUNTRY_LANGUAGES.get(country, "English")
-    
-    # Construire le prompt avec uniquement les données essentielles
+
+    # Construire le prompt avec les données essentielles + affiliate_link
     codes_data = []
     for idx, record in enumerate(records, 1):
         codes_data.append({
             "id": idx,
             "code": record.get("Code", ""),
-            "title": record.get("Title", "")
+            "title": record.get("Title", ""),
+            "affiliate_link": record.get("Affiliate_Link", "")
         })
-    
-    batch_prompt = f"""Rewrite {len(codes_data)} promo code titles in {language} following these rules:
 
+    batch_prompt = f"""Process {len(codes_data)} promo codes. For each one:
+
+1. REWRITE THE TITLE in {language} following these rules:
 {REWRITE_RULES}
+
+2. EXTRACT THE NETWORK from the affiliate_link URL:
+- Look at the domain/URL structure to identify the affiliate network
+- Common networks: Awin, CJ (Commission Junction), Rakuten, Impact, ShareASale, Partnerize, Webgains, TradeDoubler, Effiliation, etc.
+- If no affiliate link or network not identifiable, return empty string ""
 
 IMPORTANT: All rewritten titles MUST be in {language}.
 
-Also, for each code, determine if it's a SPAM/FAKE code:
-- spam_code = true if: affiliate codes (HONEY, RAKUTEN, etc.), random strings, auto-generated codes, competitor codes
-- spam_code = false if: looks like a legitimate promo code
-
-TITLES TO REWRITE:
+DATA TO PROCESS:
 {json.dumps(codes_data)}
 
 RESPOND WITH JSON ARRAY ONLY:
-[{{"id":1,"rewritten_title":"...in {language}...","spam_code":false}},...]
+[{{"id":1,"rewritten_title":"...in {language}...","network":"Awin"}},...]
 """
-    
+
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": f"Rewrite titles in {language} and detect spam codes. JSON array only."},
+            {"role": "system", "content": f"Rewrite titles in {language} and extract affiliate networks from URLs. JSON array only."},
             {"role": "user", "content": batch_prompt}
         ],
         temperature=0.3,
-        max_tokens=min(len(records) * 50, 16000)  # ~50 tokens par titre, max 16000
+        max_tokens=min(len(records) * 60, 16000)  # ~60 tokens par entrée, max 16000
     )
-    
+
     result_text = response.choices[0].message.content.strip()
-    
+
     # Nettoyer si le LLM ajoute des backticks markdown
     if result_text.startswith("```"):
         result_text = result_text.split("```")[1]
         if result_text.startswith("json"):
             result_text = result_text[4:]
     result_text = result_text.strip()
-    
+
     results = json.loads(result_text)
-    
+
     # Vérifier que le nombre de résultats correspond
     if len(results) != len(records):
         raise ValueError(f"Expected {len(records)} results, got {len(results)}")
-    
+
     return results
 
 
 def analyze_all_codes(records: list, country: str) -> list:
     """
-    Réécrit les titres du batch en UNE SEULE requête LLM.
-    
+    Réécrit les titres et extrait les networks du batch en UNE SEULE requête LLM.
+
     Args:
         records: Liste des codes à traiter
         country: Code pays pour la langue (UK, DE, ES, FR, IT, etc.)
-    
+
     Returns:
-        Liste de résultats avec les données originales + titre réécrit
+        Liste de résultats avec les données originales + titre réécrit + network
     """
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY environment variable not set!")
-    
+
     client = OpenAI(api_key=OPENAI_API_KEY)
-    
-    print(f"\n🤖 Réécriture de {len(records)} titres avec GPT-4o-mini...")
-    
+
+    print(f"\n🤖 Traitement de {len(records)} codes avec GPT-4o-mini...")
+
     # Traiter tout le batch en une seule fois
     analyses = analyze_batch_with_llm(records, client, country)
-    
+
     # Associer les résultats aux records originaux
     results = []
     for idx, record in enumerate(records):
         # Trouver l'analyse correspondante par ID
         analysis = next((a for a in analyses if a.get("id") == idx + 1), None)
-        
+
         if analysis:
             result = {
                 "original_data": record,
                 "analysis": analysis
             }
             results.append(result)
-            print(f"   [{idx+1}/{len(records)}] {record.get('Title', '')[:40]} → {analysis['rewritten_title'][:40]}")
+            network_info = f" | Network: {analysis.get('network', '')}" if analysis.get('network') else ""
+            print(f"   [{idx+1}/{len(records)}] {record.get('Title', '')[:35]} → {analysis['rewritten_title'][:35]}{network_info}")
         else:
             print(f"   [{idx+1}/{len(records)}] ❌ No result for code {idx+1}")
-    
-    print(f"   ✅ Batch de {len(results)} titres réécrits")
+
+    print(f"   ✅ Batch de {len(results)} codes traités")
     return results
 
 
 def update_sheet_with_results(worksheet, results: list):
     """
-    Met à jour le Google Sheet avec les titres réécrits.
-    Met à jour les colonnes Rewritten_Title et Spam_Code.
-    
+    Met à jour le Google Sheet avec les titres réécrits et les networks.
+    Met à jour les colonnes Rewritten_Title et Network.
+
     Args:
         worksheet: Objet worksheet gspread
         results: Liste des résultats
     """
     print("\n📝 Mise à jour du Google Sheet...")
-    
+
     # Batch update pour être plus rapide
     updates = []
-    
+
     for r in results:
         row_index = r["original_data"].get("_row_index")
         rewritten_col = r["original_data"].get("_rewritten_col")
-        spam_col = r["original_data"].get("_spam_col")
-        
+        network_col = r["original_data"].get("_network_col")
+
         if not row_index or not rewritten_col:
             continue
-        
+
         analysis = r["analysis"]
-        
+
         # Convertir les indices de colonnes en lettres (A, B, C, etc.)
         from gspread.utils import rowcol_to_a1
-        
+
         # Rewritten_Title
         rewritten_cell = rowcol_to_a1(row_index, rewritten_col)
         updates.append({
             "range": rewritten_cell,
             "values": [[analysis["rewritten_title"]]]
         })
-        
-        # Spam_Code
-        if spam_col:
-            spam_cell = rowcol_to_a1(row_index, spam_col)
-            spam_value = "True" if analysis.get("spam_code", False) else "False"
+
+        # Network
+        if network_col:
+            network_cell = rowcol_to_a1(row_index, network_col)
+            network_value = analysis.get("network", "")
             updates.append({
-                "range": spam_cell,
-                "values": [[spam_value]]
+                "range": network_cell,
+                "values": [[network_value]]
             })
-    
+
     # Faire le batch update
     if updates:
         worksheet.batch_update(updates)
@@ -388,11 +386,11 @@ def update_sheet_with_results(worksheet, results: list):
 def save_results_json(results: list, output_path: str = None):
     """
     Sauvegarde les résultats en JSON.
-    
+
     Args:
         results: Liste des résultats d'analyse
         output_path: Chemin du fichier JSON (optionnel)
-    
+
     Returns:
         Chemin du fichier créé
     """
@@ -403,10 +401,10 @@ def save_results_json(results: list, output_path: str = None):
             "Output",
             f"code_analysis_{timestamp}.json"
         )
-    
+
     # Créer le dossier si nécessaire
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
+
     # Formater les résultats pour le JSON final
     formatted_results = []
     for r in results:
@@ -415,18 +413,20 @@ def save_results_json(results: list, output_path: str = None):
             "country": r["original_data"].get("Country"),
             "code": r["original_data"].get("Code"),
             "original_title": r["original_data"].get("Title"),
-            "rewritten_title": r["analysis"]["rewritten_title"]
+            "rewritten_title": r["analysis"]["rewritten_title"],
+            "affiliate_link": r["original_data"].get("Affiliate_Link"),
+            "network": r["analysis"].get("network", "")
         })
-    
+
     output_data = {
         "generated_at": datetime.now().isoformat(),
         "total_codes": len(formatted_results),
         "results": formatted_results
     }
-    
+
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output_data, f, indent=2, ensure_ascii=False)
-    
+
     print(f"\n💾 Résultats sauvegardés: {output_path}")
     return output_path
 

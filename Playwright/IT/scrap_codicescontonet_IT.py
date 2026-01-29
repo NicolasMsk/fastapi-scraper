@@ -132,13 +132,22 @@ def scrape_codicescontonet_all(page, context, url):
         new_page.wait_for_timeout(2000)
         
         # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+        # Attend jusqu'à 10 secondes et vérifie que l'URL est stable (1.5s)
         try:
-            for _ in range(10):
+            last_url = None
+            stable_count = 0
+            for _ in range(20):  # Max 10 secondes
                 current_url = page.url
                 if "codice-sconto" not in current_url.lower():
-                    affiliate_link = current_url
-                    print(f"[CodiceSconto] 🔗 Affiliate captured: {affiliate_link[:60]}...")
-                    break
+                    if current_url == last_url:
+                        stable_count += 1
+                        if stable_count >= 3:  # URL stable pendant 1.5 secondes
+                            affiliate_link = current_url
+                            print(f"[CodiceSconto] 🔗 Affiliate captured: {affiliate_link[:60]}...")
+                            break
+                    else:
+                        stable_count = 0
+                        last_url = current_url
                 page.wait_for_timeout(500)
             if not affiliate_link:
                 print(f"[CodiceSconto] ⚠️ No affiliate link captured (page stayed on codice-sconto)")

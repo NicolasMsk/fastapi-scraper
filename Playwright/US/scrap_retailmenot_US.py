@@ -54,16 +54,28 @@ def scrape_retailmenot_all(page, context, url):
             new_page.wait_for_load_state("domcontentloaded")
             page.wait_for_timeout(2000)
             
-            # === CAPTURE AFFILIATE LINK ===
+            # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
+            # Attend jusqu'à 10 secondes et vérifie que l'URL est stable (1.5s)
             try:
-                for _ in range(10):
+                last_url = None
+                stable_count = 0
+                for _ in range(20):  # Max 10 secondes
                     current_url = page.url
-                    if "retailmenot" not in current_url:
-                        affiliate_link = current_url
-                        break
+                    if "retailmenot" not in current_url.lower():
+                        if current_url == last_url:
+                            stable_count += 1
+                            if stable_count >= 3:  # URL stable pendant 1.5 secondes
+                                affiliate_link = current_url
+                                print(f"[RetailMeNot] 🔗 Affiliate captured: {affiliate_link[:60]}...")
+                                break
+                        else:
+                            stable_count = 0
+                            last_url = current_url
                     page.wait_for_timeout(500)
-            except:
-                pass
+                if not affiliate_link:
+                    print(f"[RetailMeNot] ⚠️ No affiliate link captured (page stayed on retailmenot)")
+            except Exception as e:
+                print(f"[RetailMeNot] ⚠️ Error capturing affiliate: {str(e)[:30]}")
             
             # Vérifier si c'est une page RetailMeNot
             if "retailmenot" in new_page.url:

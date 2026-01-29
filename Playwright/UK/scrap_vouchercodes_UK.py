@@ -23,7 +23,30 @@ def scrape_vouchercodes_all(page, context, url):
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(3000)
+
+        # Vérifier et attendre si Cloudflare challenge est actif
+        for cloudflare_attempt in range(15):  # Max 15 secondes d'attente
+            page_title = page.title()
+            if "just a moment" in page_title.lower() or "checking" in page_title.lower():
+                print(f"[VoucherCodes] ⏳ Cloudflare challenge detected, waiting... ({cloudflare_attempt+1}/15)")
+                page.wait_for_timeout(1000)
+            else:
+                break
+
+        # DEBUG: Afficher le titre et l'URL de la page
+        try:
+            page_title = page.title()
+            final_url = page.url
+            print(f"[VoucherCodes] Page title: {page_title[:80]}...")
+            print(f"[VoucherCodes] Final URL: {final_url}")
+
+            # Si toujours sur Cloudflare après l'attente, abandonner ce marchand
+            if "just a moment" in page_title.lower():
+                print(f"[VoucherCodes] ❌ Cloudflare challenge not passed, skipping...")
+                return results, affiliate_link
+        except Exception as e:
+            print(f"[VoucherCodes] ⚠️ Could not get page info: {str(e)[:30]}")
 
         # Fermer cookie banner
         try:
@@ -32,10 +55,17 @@ def scrape_vouchercodes_all(page, context, url):
         except:
             pass
 
+        # Attendre que les offres soient chargées
+        try:
+            page.wait_for_selector("button[data-qa='el:offerPrimaryButton']", timeout=15000)
+        except:
+            print("[VoucherCodes] ⚠️ Timeout waiting for offer buttons")
+
         # Trouver TOUS les boutons "Get Code" (on vérifiera l'exclusivité après clic)
         get_code_buttons = page.locator("button[data-qa='el:offerPrimaryButton']:has-text('Get Code')")
         count = get_code_buttons.count()
 
+        # Fallback si 0 boutons trouvés
         if count == 0:
             get_code_buttons = page.locator("button:has-text('Get Code')")
             count = get_code_buttons.count()
@@ -62,12 +92,21 @@ def scrape_vouchercodes_all(page, context, url):
 
         # === CAPTURE DU LIEN AFFILIÉ ===
         # La page originale se redirige vers le site marchand
+        # Attend jusqu'à 10 secondes et vérifie que l'URL est stable (1.5s)
         try:
-            for _ in range(10):  # Max 5 secondes
+            last_url = None
+            stable_count = 0
+            for _ in range(20):  # Max 10 secondes
                 current_url = page.url
                 if "vouchercodes.co.uk" not in current_url:
-                    affiliate_link = current_url
-                    break
+                    if current_url == last_url:
+                        stable_count += 1
+                        if stable_count >= 3:  # URL stable pendant 1.5 secondes
+                            affiliate_link = current_url
+                            break
+                    else:
+                        stable_count = 0
+                        last_url = current_url
                 page.wait_for_timeout(500)
         except:
             pass
@@ -229,72 +268,14 @@ def main():
     print(f"\n🚀 Lancement de Playwright...")
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-                "--disable-web-security",
-                "--disable-features=IsolateOrigins,site-per-process",
-                "--disable-infobars",
-                "--window-size=1920,1080",
-                "--start-maximized"
-            ]
-        )
+        # Configuration Firefox pour contourner Cloudflare (moins détecté que Chromium)
+        browser = p.firefox.launch(headless=True)
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
-            screen={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            java_script_enabled=True,
-            bypass_csp=True,
-            ignore_https_errors=True,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
             locale="en-GB",
             timezone_id="Europe/London"
         )
-
-        # Script stealth pour masquer le mode headless
-        context.add_init_script("""
-            // Override navigator.webdriver
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-
-            // Override navigator.plugins
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5]
-            });
-
-            // Override navigator.languages
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['en-GB', 'en-US', 'en']
-            });
-
-            // Override chrome runtime
-            window.chrome = {
-                runtime: {}
-            };
-
-            // Override permissions
-            const originalQuery = window.navigator.permissions.query;
-            window.navigator.permissions.query = (parameters) => (
-                parameters.name === 'notifications' ?
-                    Promise.resolve({ state: Notification.permission }) :
-                    originalQuery(parameters)
-            );
-
-            // Override WebGL vendor
-            const getParameter = WebGLRenderingContext.prototype.getParameter;
-            WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                if (parameter === 37445) {
-                    return 'Intel Inc.';
-                }
-                if (parameter === 37446) {
-                    return 'Intel Iris OpenGL Engine';
-                }
-                return getParameter.apply(this, arguments);
-            };
-        """)
 
         page = context.new_page()
         
