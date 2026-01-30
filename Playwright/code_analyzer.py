@@ -109,13 +109,13 @@ def find_todays_spreadsheet(client):
 
 def ensure_llm_columns(worksheet):
     """
-    Ajoute les colonnes Rewritten_Title (après Title) et Network (après Affiliate_Link) si elles n'existent pas.
+    Ajoute les colonnes Rewritten_Title (après Title), Network et Confidence (après Affiliate_Link) si elles n'existent pas.
 
     Args:
         worksheet: Objet worksheet gspread
 
     Returns:
-        tuple: (title_col_index, rewritten_title_col_index, network_col_index)
+        tuple: (title_col_index, rewritten_title_col_index, network_col_index, confidence_col_index)
     """
     header = worksheet.row_values(1)
 
@@ -152,6 +152,19 @@ def ensure_llm_columns(worksheet):
         print(f"   📝 Ajout de la colonne Network (col {network_col})")
         worksheet.insert_cols(values=[["Network"]], col=network_col)
         print(f"   ✅ Colonne ajoutée: Network")
+        # Relire le header
+        header = worksheet.row_values(1)
+
+    # Re-lire le header pour être sûr d'avoir les bons indices
+    header = worksheet.row_values(1)
+    network_col = header.index("Network") + 1
+
+    # Vérifier et ajouter Confidence (juste après Network)
+    confidence_col = network_col + 1
+    if len(header) < confidence_col or header[confidence_col - 1] != "Confidence":
+        print(f"   📝 Ajout de la colonne Confidence (col {confidence_col})")
+        worksheet.insert_cols(values=[["Confidence"]], col=confidence_col)
+        print(f"   ✅ Colonne ajoutée: Confidence")
     else:
         print(f"   ✅ Colonnes LLM déjà présentes")
 
@@ -159,8 +172,9 @@ def ensure_llm_columns(worksheet):
     header = worksheet.row_values(1)
     rewritten_title_col = header.index("Rewritten_Title") + 1
     network_col = header.index("Network") + 1
+    confidence_col = header.index("Confidence") + 1
 
-    return title_idx, rewritten_title_col, network_col
+    return title_idx, rewritten_title_col, network_col, confidence_col
 
 
 def get_missing_codes(worksheet, batch_size: int = 100):
@@ -177,7 +191,7 @@ def get_missing_codes(worksheet, batch_size: int = 100):
     print(f"📥 Récupération des données de la sheet '{worksheet.title}'...")
 
     # S'assurer que les colonnes LLM existent
-    title_idx, rewritten_title_col, network_col = ensure_llm_columns(worksheet)
+    title_idx, rewritten_title_col, network_col, confidence_col = ensure_llm_columns(worksheet)
 
     all_records = worksheet.get_all_records()
 
@@ -198,6 +212,7 @@ def get_missing_codes(worksheet, batch_size: int = 100):
             record["_row_index"] = original_index + 2  # +2 pour header et 1-based
             record["_rewritten_col"] = rewritten_title_col
             record["_network_col"] = network_col
+            record["_confidence_col"] = confidence_col
             batch_with_index.append(record)
         except ValueError:
             continue
@@ -248,10 +263,60 @@ def analyze_batch_with_llm(records: list, client: OpenAI, country: str) -> list:
 1. REWRITE THE TITLE in {language} following these rules:
 {REWRITE_RULES}
 
-2. EXTRACT THE NETWORK from the affiliate_link URL:
-- Look at the domain/URL structure to identify the affiliate network
-- Common networks: Awin, CJ (Commission Junction), Rakuten, Impact, ShareASale, Partnerize, Webgains, TradeDoubler, Effiliation, etc.
-- If no affiliate link or network not identifiable, return empty string ""
+2. EXTRACT THE NETWORK from the affiliate_link URL using this expert analysis:
+
+You are an affiliate marketing expert.
+Your role is to identify the affiliate network from a URL.
+
+Common networks to detect (in priority order):
+
+1. Known third-party networks:
+   - Awin (parameters: awc=, domains: awin1.com, zenaps.com)
+   - CJ / Commission Junction (parameters: cjevent=, domains: anrdoezrs.net, jdoqocy.com, tkqlhce.com, dpbolvw.net, kqzyfj.com)
+   - Rakuten (domains: click.linksynergy.com, linksynergy.com)
+   - ShareASale (domains: shareasale.com)
+   - Impact (domains: impact.com, sjv.io, evyy.net, 7eer.net)
+   - Partnerize (domains: prf.hn, partnerize.com)
+   - TradeDoubler (domains: tradedoubler.com, clkuk.tradedoubler.com)
+   - Webgains (domains: track.webgains.com)
+   - Pepper Jam (domains: pepperjam.com, pjtra.com)
+   - FlexOffers (domains: flexoffers.com)
+   - Skimlinks (domains: go.skimresources.com, redirectingat.com)
+   - Sovrn (domains: redirect.viglink.com)
+   - AvantLink (domains: avantlink.com)
+   - Refersion (domains: refersion.com)
+   - Tapfiliate (domains: tapfiliate.com)
+   - Post Affiliate Pro (domains: postaffiliatepro.com)
+   - HasOffers / TUNE (domains: hasoffers.com, go2cloud.org)
+   - Admitad (domains: admitad.com)
+   - Affilinet (domains: affilinet.com, webmasterplan.com)
+   - Zanox (merged with Awin, treat as Awin)
+
+2. Direct/Proprietary affiliate program:
+   - Label: "direct_proprietary"
+   - If the link contains typical affiliate parameters such as:
+     * ref=
+     * affiliate=
+     * partner=
+     * aff_id=
+     * tag=
+     * affid=
+   - BUT does NOT match any known third-party network above
+   - Examples: amazon.com/...?tag=..., merchant.com/...?ref=...
+
+3. E-commerce with no tracking parameters:
+   - Label: "no_parameters_ecommerce"
+   - Direct links to merchant sites (e-commerce) WITHOUT any tracking parameters
+   - "Clean" URLs with no query parameters or only non-tracking parameters (utm_source, etc.)
+   - Indicates a likely non-affiliated merchant or unpaid link
+   - Examples: nike.com/shoes/air-max, amazon.com/product-name
+
+4. Unknown:
+   - Label: "unknown"
+   - If impossible to determine with certainty
+   - Ambiguous links or unrecognized formats
+
+IMPORTANT: First analyze domains, then parameters. If no third-party network is identified, check for affiliate parameters for "direct_proprietary", otherwise check if it's an e-commerce link without parameters for "no_parameters_ecommerce".
 
 IMPORTANT: All rewritten titles MUST be in {language}.
 
@@ -259,7 +324,7 @@ DATA TO PROCESS:
 {json.dumps(codes_data)}
 
 RESPOND WITH JSON ARRAY ONLY:
-[{{"id":1,"rewritten_title":"...in {language}...","network":"Awin"}},...]
+[{{"id":1,"rewritten_title":"...in {language}...","network":"Awin","confidence":"high"}},...]
 """
 
     response = client.chat.completions.create(
@@ -324,7 +389,8 @@ def analyze_all_codes(records: list, country: str) -> list:
             }
             results.append(result)
             network_info = f" | Network: {analysis.get('network', '')}" if analysis.get('network') else ""
-            print(f"   [{idx+1}/{len(records)}] {record.get('Title', '')[:35]} → {analysis['rewritten_title'][:35]}{network_info}")
+            confidence_info = f" ({analysis.get('confidence', '')})" if analysis.get('confidence') else ""
+            print(f"   [{idx+1}/{len(records)}] {record.get('Title', '')[:35]} → {analysis['rewritten_title'][:35]}{network_info}{confidence_info}")
         else:
             print(f"   [{idx+1}/{len(records)}] ❌ No result for code {idx+1}")
 
@@ -334,8 +400,8 @@ def analyze_all_codes(records: list, country: str) -> list:
 
 def update_sheet_with_results(worksheet, results: list):
     """
-    Met à jour le Google Sheet avec les titres réécrits et les networks.
-    Met à jour les colonnes Rewritten_Title et Network.
+    Met à jour le Google Sheet avec les titres réécrits, networks et confidence.
+    Met à jour les colonnes Rewritten_Title, Network et Confidence.
 
     Args:
         worksheet: Objet worksheet gspread
@@ -350,6 +416,7 @@ def update_sheet_with_results(worksheet, results: list):
         row_index = r["original_data"].get("_row_index")
         rewritten_col = r["original_data"].get("_rewritten_col")
         network_col = r["original_data"].get("_network_col")
+        confidence_col = r["original_data"].get("_confidence_col")
 
         if not row_index or not rewritten_col:
             continue
@@ -373,6 +440,15 @@ def update_sheet_with_results(worksheet, results: list):
             updates.append({
                 "range": network_cell,
                 "values": [[network_value]]
+            })
+
+        # Confidence
+        if confidence_col:
+            confidence_cell = rowcol_to_a1(row_index, confidence_col)
+            confidence_value = analysis.get("confidence", "")
+            updates.append({
+                "range": confidence_cell,
+                "values": [[confidence_value]]
             })
 
     # Faire le batch update
@@ -415,7 +491,8 @@ def save_results_json(results: list, output_path: str = None):
             "original_title": r["original_data"].get("Title"),
             "rewritten_title": r["analysis"]["rewritten_title"],
             "affiliate_link": r["original_data"].get("Affiliate_Link"),
-            "network": r["analysis"].get("network", "")
+            "network": r["analysis"].get("network", ""),
+            "confidence": r["analysis"].get("confidence", "")
         })
 
     output_data = {

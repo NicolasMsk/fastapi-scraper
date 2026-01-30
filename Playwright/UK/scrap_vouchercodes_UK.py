@@ -23,10 +23,10 @@ def scrape_vouchercodes_all(page, context, url):
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(1500)
 
         # Vérifier et attendre si Cloudflare challenge est actif
-        for cloudflare_attempt in range(15):  # Max 15 secondes d'attente
+        for cloudflare_attempt in range(8):  # Max 8 secondes d'attente
             page_title = page.title()
             if "just a moment" in page_title.lower() or "checking" in page_title.lower():
                 print(f"[VoucherCodes] ⏳ Cloudflare challenge detected, waiting... ({cloudflare_attempt+1}/15)")
@@ -88,26 +88,25 @@ def scrape_vouchercodes_all(page, context, url):
 
         new_page = new_page_info.value
         new_page.wait_for_load_state("domcontentloaded")
-        new_page.wait_for_timeout(2000)
+        new_page.wait_for_timeout(800)
 
-        # === CAPTURE DU LIEN AFFILIÉ ===
-        # La page originale se redirige vers le site marchand
-        # Attend jusqu'à 10 secondes et vérifie que l'URL est stable (1.5s)
+        # === CAPTURE DU LIEN AFFILIÉ (optimisé) ===
+        # Attend max 3 secondes, vérifie stabilité sur 2 checks
         try:
             last_url = None
             stable_count = 0
-            for _ in range(20):  # Max 10 secondes
+            for _ in range(10):  # Max 3 secondes
                 current_url = page.url
                 if "vouchercodes.co.uk" not in current_url:
                     if current_url == last_url:
                         stable_count += 1
-                        if stable_count >= 3:  # URL stable pendant 1.5 secondes
+                        if stable_count >= 2:  # URL stable pendant 600ms
                             affiliate_link = current_url
                             break
                     else:
                         stable_count = 0
                         last_url = current_url
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(300)
         except:
             pass
 
@@ -115,7 +114,7 @@ def scrape_vouchercodes_all(page, context, url):
         # Pattern d'indexation: 0, 0, 1, 2, 3, ..., N-2
         for iteration in range(count):
             try:
-                new_page.wait_for_timeout(1500)
+                new_page.wait_for_timeout(500)
 
                 # Chercher le code dans la popup
                 code = None
@@ -197,7 +196,7 @@ def scrape_vouchercodes_all(page, context, url):
                         close_btn = new_page.locator(selector).first
                         if close_btn.count() > 0 and close_btn.is_visible():
                             close_btn.click()
-                            new_page.wait_for_timeout(500)
+                            new_page.wait_for_timeout(200)
                             popup_closed = True
                             break
                     except:
@@ -206,7 +205,7 @@ def scrape_vouchercodes_all(page, context, url):
                 if not popup_closed:
                     try:
                         new_page.keyboard.press("Escape")
-                        new_page.wait_for_timeout(500)
+                        new_page.wait_for_timeout(200)
                     except:
                         pass
 
