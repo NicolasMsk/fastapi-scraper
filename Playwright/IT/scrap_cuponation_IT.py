@@ -31,8 +31,7 @@ def scrape_cuponation_it_all(page, context, url):
     8. Répéter jusqu'à avoir tous les codes
     """
     results = []
-    affiliate_link = None
-    
+
     try:
         print(f"[CuponationIT] Accès à l'URL: {url}")
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -101,30 +100,7 @@ def scrape_cuponation_it_all(page, context, url):
         new_page = new_page_info.value
         new_page.wait_for_load_state("domcontentloaded")
         new_page.wait_for_timeout(2000)
-        
-        # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
-        # Attend jusqu'à 10 secondes et vérifie que l'URL est stable (1.5s)
-        try:
-            last_url = None
-            stable_count = 0
-            for _ in range(20):  # Max 10 secondes
-                current_url = page.url
-                if "cuponation" not in current_url.lower():
-                    if current_url == last_url:
-                        stable_count += 1
-                        if stable_count >= 3:  # URL stable pendant 1.5 secondes
-                            affiliate_link = current_url
-                            print(f"[CuponationIT] 🔗 Affiliate captured: {affiliate_link[:60]}...")
-                            break
-                    else:
-                        stable_count = 0
-                        last_url = current_url
-                page.wait_for_timeout(500)
-            if not affiliate_link:
-                print(f"[CuponationIT] ⚠️ No affiliate link captured (page stayed on cuponation)")
-        except Exception as e:
-            print(f"[CuponationIT] ⚠️ Error capturing affiliate: {str(e)[:30]}")
-        
+
         print("[CuponationIT] Switché vers le nouvel onglet")
         
         max_iterations = 30  # Sécurité
@@ -181,10 +157,8 @@ def scrape_cuponation_it_all(page, context, url):
                 processed_codes.add(code)
                 processed_titles.add(current_title)
                 results.append({
-                    "success": True,
                     "code": code,
-                    "title": current_title,
-                    "message": "Code extrait avec succès"
+                    "title": current_title
                 })
                 print(f"[CuponationIT] ✅ Code: {code} -> {current_title[:40]}...")
             else:
@@ -268,7 +242,7 @@ def scrape_cuponation_it_all(page, context, url):
     except Exception as e:
         print(f"[CuponationIT] ❌ Erreur générale: {str(e)[:50]}")
     
-    return results, affiliate_link
+    return results
 
 
 def main():
@@ -298,9 +272,9 @@ def main():
             print(f"   URL: {url[:60]}...")
             
             try:
-                codes, affiliate_link = scrape_cuponation_it_all(page, context, url)
+                codes = scrape_cuponation_it_all(page, context, url)
                 print(f"   ✅ {len(codes)} codes trouvés")
-                
+
                 for code_info in codes:
                     all_results.append({
                         "Date": datetime.now().strftime("%Y-%m-%d"),
@@ -310,7 +284,6 @@ def main():
                         "GPN_URL": merchant_row.get("GPN_URL", ""),
                         "Competitor_Source": "cuponation_it",
                         "Competitor_URL": url,
-                        "Affiliate_Link": affiliate_link or "",
                         "Code": code_info.get("code", ""),
                         "Title": code_info.get("title", "")
                     })

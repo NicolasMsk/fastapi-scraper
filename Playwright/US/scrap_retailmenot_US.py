@@ -21,8 +21,7 @@ def scrape_retailmenot_all(page, context, url):
     Même logique que le scraper FastAPI.
     """
     results = []
-    affiliate_link = None
-    
+
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
@@ -53,30 +52,7 @@ def scrape_retailmenot_all(page, context, url):
             new_page = new_page_info.value
             new_page.wait_for_load_state("domcontentloaded")
             page.wait_for_timeout(2000)
-            
-            # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
-            # Attend jusqu'à 10 secondes et vérifie que l'URL est stable (1.5s)
-            try:
-                last_url = None
-                stable_count = 0
-                for _ in range(20):  # Max 10 secondes
-                    current_url = page.url
-                    if "retailmenot" not in current_url.lower():
-                        if current_url == last_url:
-                            stable_count += 1
-                            if stable_count >= 3:  # URL stable pendant 1.5 secondes
-                                affiliate_link = current_url
-                                print(f"[RetailMeNot] 🔗 Affiliate captured: {affiliate_link[:60]}...")
-                                break
-                        else:
-                            stable_count = 0
-                            last_url = current_url
-                    page.wait_for_timeout(500)
-                if not affiliate_link:
-                    print(f"[RetailMeNot] ⚠️ No affiliate link captured (page stayed on retailmenot)")
-            except Exception as e:
-                print(f"[RetailMeNot] ⚠️ Error capturing affiliate: {str(e)[:30]}")
-            
+
             # Vérifier si c'est une page RetailMeNot
             if "retailmenot" in new_page.url:
                 work_page = new_page
@@ -143,8 +119,7 @@ def scrape_retailmenot_all(page, context, url):
                 processed_codes.add(code)
                 results.append({
                     "code": code,
-                    "title": title,
-                    "affiliate_link": affiliate_link
+                    "title": title
                 })
         
         # Fermer le nouvel onglet si on en a ouvert un
@@ -157,7 +132,7 @@ def scrape_retailmenot_all(page, context, url):
     except Exception as e:
         print(f"      ❌ Erreur: {str(e)[:50]}")
     
-    return results, affiliate_link
+    return results
 
 
 def main():
@@ -187,11 +162,9 @@ def main():
             print(f"   URL: {url[:60]}...")
             
             try:
-                codes, affiliate_link = scrape_retailmenot_all(page, context, url)
+                codes = scrape_retailmenot_all(page, context, url)
                 print(f"   ✅ {len(codes)} codes trouvés")
-                if affiliate_link:
-                    print(f"   🔗 Affiliate: {affiliate_link[:50]}...")
-                
+
                 for code_info in codes:
                     all_results.append({
                         "Date": datetime.now().strftime("%Y-%m-%d"),
@@ -201,7 +174,6 @@ def main():
                         "GPN_URL": merchant_row.get("GPN_URL", ""),
                         "Competitor_Source": "retailmenot",
                         "Competitor_URL": url,
-                        "Affiliate_Link": code_info.get("affiliate_link", ""),
                         "Code": code_info["code"],
                         "Title": code_info["title"]
                     })

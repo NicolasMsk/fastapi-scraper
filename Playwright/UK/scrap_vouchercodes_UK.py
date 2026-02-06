@@ -17,9 +17,8 @@ from gsheet_writer import append_to_gsheet
 
 
 def scrape_vouchercodes_all(page, context, url):
-    """Scrape tous les codes d'une page VoucherCodes avec Playwright + lien affilié"""
+    """Scrape tous les codes d'une page VoucherCodes avec Playwright"""
     results = []
-    affiliate_link = None
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -44,7 +43,7 @@ def scrape_vouchercodes_all(page, context, url):
             # Si toujours sur Cloudflare après l'attente, abandonner ce marchand
             if "just a moment" in page_title.lower():
                 print(f"[VoucherCodes] ❌ Cloudflare challenge not passed, skipping...")
-                return results, affiliate_link
+                return results
         except Exception as e:
             print(f"[VoucherCodes] ⚠️ Could not get page info: {str(e)[:30]}")
 
@@ -73,7 +72,7 @@ def scrape_vouchercodes_all(page, context, url):
         print(f"[VoucherCodes] {count} boutons 'Get Code' trouvés")
 
         if count == 0:
-            return results, affiliate_link
+            return results
 
         processed_codes = set()
         processed_titles = set()
@@ -89,26 +88,6 @@ def scrape_vouchercodes_all(page, context, url):
         new_page = new_page_info.value
         new_page.wait_for_load_state("domcontentloaded")
         new_page.wait_for_timeout(800)
-
-        # === CAPTURE DU LIEN AFFILIÉ (optimisé) ===
-        # Attend max 3 secondes, vérifie stabilité sur 2 checks
-        try:
-            last_url = None
-            stable_count = 0
-            for _ in range(10):  # Max 3 secondes
-                current_url = page.url
-                if "vouchercodes.co.uk" not in current_url:
-                    if current_url == last_url:
-                        stable_count += 1
-                        if stable_count >= 2:  # URL stable pendant 600ms
-                            affiliate_link = current_url
-                            break
-                    else:
-                        stable_count = 0
-                        last_url = current_url
-                page.wait_for_timeout(300)
-        except:
-            pass
 
         # Itérer sur tous les codes (on en a détecté 'count' au départ)
         # Pattern d'indexation: 0, 0, 1, 2, 3, ..., N-2
@@ -165,7 +144,7 @@ def scrape_vouchercodes_all(page, context, url):
                 if code and title and not is_exclusive and code not in processed_codes and title not in processed_titles:
                     processed_codes.add(code)
                     processed_titles.add(title)
-                    results.append({"code": code, "title": title, "affiliate_link": affiliate_link})
+                    results.append({"code": code, "title": title})
                     print(f"[VoucherCodes] ✅ Code: {code} | {title[:50]}...")
                 else:
                     # Logger pourquoi le code n'est pas ajouté
@@ -251,7 +230,7 @@ def scrape_vouchercodes_all(page, context, url):
     except Exception as e:
         print(f"      ❌ Erreur: {str(e)[:50]}")
 
-    return results, affiliate_link
+    return results
 
 
 def main():
@@ -288,11 +267,9 @@ def main():
             page = context.new_page()
             
             try:
-                codes, affiliate_link = scrape_vouchercodes_all(page, context, url)
+                codes = scrape_vouchercodes_all(page, context, url)
                 print(f"   ✅ {len(codes)} codes trouvés")
-                if affiliate_link:
-                    print(f"   🔗 Affiliate: {affiliate_link[:50]}...")
-                
+
                 for code_info in codes:
                     all_results.append({
                         "Date": datetime.now().strftime("%Y-%m-%d"),
@@ -303,8 +280,7 @@ def main():
                         "Competitor_Source": "vouchercodes",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Title": code_info["title"],
-                        "Affiliate_Link": code_info.get("affiliate_link", "")
+                        "Title": code_info["title"]
                     })
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")

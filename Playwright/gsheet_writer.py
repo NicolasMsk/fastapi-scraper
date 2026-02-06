@@ -166,7 +166,7 @@ def append_to_gsheet(results: list, source_name: str = None, skip_cleaning: bool
         # Colonnes attendues dans l'ordre (doit correspondre au spreadsheet)
         columns = [
             "Date", "Country", "Merchant_ID", "Merchant_slug", "GPN_URL",
-            "Competitor_Source", "Competitor_URL", "Affiliate_Link", "Code", "Title",
+            "Competitor_Source", "Competitor_URL", "Code", "Title",
             "Actioned by", "Comments"
         ]
 
@@ -181,7 +181,6 @@ def append_to_gsheet(results: list, source_name: str = None, skip_cleaning: bool
                 result.get("GPN_URL", ""),
                 result.get("Competitor_Source", ""),
                 result.get("Competitor_URL", ""),
-                result.get("Affiliate_Link", ""),  # Affiliate_Link entre Competitor_URL et Code
                 result.get("Code", ""),
                 result.get("Title", ""),
                 "",  # Actioned by - laissé vide pour remplissage manuel

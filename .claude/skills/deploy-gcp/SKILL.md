@@ -35,7 +35,7 @@ Rebuild the Docker image and update Cloud Run Job(s) after code modification.
 | scraper-es-cuponation | ES | cuponation |
 | scraper-fr-igraal | FR | igraal |
 | scraper-fr-mareduc | FR | mareduc |
-| scraper-it-codice-sconto | IT | codice-sconto |
+| scraper-it-codicescontonet | IT | codice-sconto |
 | scraper-it-cuponation | IT | cuponation |
 | scraper-uk-hotukdeals | UK | hotukdeals |
 | scraper-uk-vouchercodes | UK | vouchercodes |
@@ -59,14 +59,14 @@ gcloud run jobs update JOB_NAME \
 
 ### Update ALL jobs
 ```bash
-for job in scraper-au-cuponation scraper-de-mydealz scraper-de-sparwelt scraper-es-chollometro scraper-es-cuponation scraper-fr-igraal scraper-fr-mareduc scraper-it-codice-sconto scraper-it-cuponation scraper-uk-hotukdeals scraper-uk-vouchercodes scraper-us-retailmenot scraper-us-simplycodes; do
+for job in scraper-au-cuponation scraper-de-mydealz scraper-de-sparwelt scraper-es-chollometro scraper-es-cuponation scraper-fr-igraal scraper-fr-mareduc scraper-it-codicescontonet scraper-it-cuponation scraper-uk-hotukdeals scraper-uk-vouchercodes scraper-us-retailmenot scraper-us-simplycodes; do
   gcloud run jobs update $job --image gcr.io/PROJECT_ID/playwright-scrapers:latest --region europe-west1
 done
 ```
 
 ### Execute ALL jobs (with --test) - runs in parallel
 ```bash
-for job in scraper-au-cuponation scraper-de-mydealz scraper-de-sparwelt scraper-es-chollometro scraper-es-cuponation scraper-fr-igraal scraper-fr-mareduc scraper-it-codice-sconto scraper-it-cuponation scraper-uk-hotukdeals scraper-uk-vouchercodes scraper-us-retailmenot scraper-us-simplycodes; do
+for job in scraper-au-cuponation scraper-de-mydealz scraper-de-sparwelt scraper-es-chollometro scraper-es-cuponation scraper-fr-igraal scraper-fr-mareduc scraper-it-codicescontonet scraper-it-cuponation scraper-uk-hotukdeals scraper-uk-vouchercodes scraper-us-retailmenot scraper-us-simplycodes; do
   echo "🚀 Launching $job..."
   gcloud run jobs execute $job --region europe-west1 --async
 done

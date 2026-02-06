@@ -1,7 +1,7 @@
 # Dockerfile pour FastAPI + Playwright sur Google Cloud Run
 # Image officielle Playwright avec Python - inclut tous les navigateurs et dépendances
 
-FROM mcr.microsoft.com/playwright/python:v1.57.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
 
 # Variables d'environnement
 ENV PYTHONUNBUFFERED=1
