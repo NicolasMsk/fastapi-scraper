@@ -46,11 +46,13 @@ def scrape_hotukdeals_all(page, context, url):
         # 1. Inside a card with h3 (not expired)
         # 2. NOT in the "similar vouchers" container (_1hla7140)
         # 3. NOT in the "expired" container (jkau50 with h2 containing "expired")
+        # 4. NOT "Exclusive" offers (exclude cards with "Exclusive" label)
         # ===================================================================
         xpath_valid_codes = """
             //div[@data-testid='vouchers-ui-voucher-card-description'][.//h3]
                 [not(ancestor::div[contains(@class, '_1hla7140')])]
                 [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired')]])]
+                [not(ancestor::div[@data-testid='vouchers-ui-voucher-card']//div[contains(text(), 'Exclusive')])]
             //div[@role='button' and contains(@title, 'See Code')]
         """.replace('\n', '').replace('    ', '')
         
@@ -154,6 +156,7 @@ def scrape_hotukdeals_all(page, context, url):
                     //div[@data-testid='vouchers-ui-voucher-card-description'][.//h3]
                         [not(ancestor::div[contains(@class, '_1hla7140')])]
                         [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired')]])]
+                        [not(ancestor::div[@data-testid='vouchers-ui-voucher-card']//div[contains(text(), 'Exclusive')])]
                     //div[@role='button' and contains(@title, 'See Code')]
                 """.replace('\n', '').replace('    ', '')
                 
