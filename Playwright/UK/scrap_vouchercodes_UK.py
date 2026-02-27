@@ -16,7 +16,7 @@ from gsheet_loader import get_competitor_urls, load_competitors_data
 from gsheet_writer import append_to_gsheet
 
 
-def scrape_vouchercodes_all(page, context, url):
+def scrape_vouchercodes_all(page, context, url, skip_extras=False):
     """Scrape tous les codes d'une page VoucherCodes avec Playwright"""
     results = []
 
@@ -73,6 +73,38 @@ def scrape_vouchercodes_all(page, context, url):
 
         if count == 0:
             return results
+
+        # Pré-extraire un dict titre→expiry depuis la page listing (avant de cliquer)
+        title_to_expiry = {}
+        if not skip_extras:
+            title_expiry_pairs = page.evaluate("""
+                () => {
+                    let buttons = Array.from(document.querySelectorAll("button[data-qa='el:offerPrimaryButton']"))
+                        .filter(b => b.textContent.toLowerCase().includes('get code'));
+                    if (buttons.length === 0) {
+                        buttons = Array.from(document.querySelectorAll("button"))
+                            .filter(b => b.textContent.toLowerCase().includes('get code'));
+                    }
+                    return buttons.map(btn => {
+                        let el = btn;
+                        for (let i = 0; i < 5; i++) {
+                            el = el.parentElement;
+                            if (!el) break;
+                            const t = el.querySelector("[data-qa='el:offerTitle']");
+                            if (t) {
+                                const title = t.innerText.trim();
+                                const e = el.querySelector("span[data-qa='el:offerExpiryText']");
+                                const expiry = e ? e.innerText.trim() : '';
+                                return [title, expiry];
+                            }
+                        }
+                        return ['', ''];
+                    });
+                }
+            """)
+            for pair in title_expiry_pairs:
+                if pair[0]:
+                    title_to_expiry[pair[0]] = pair[1]
 
         processed_codes = set()
         processed_titles = set()
@@ -140,12 +172,38 @@ def scrape_vouchercodes_all(page, context, url):
                 except:
                     pass
 
+                # Expiration_Date et Terms (skip si --legacy)
+                expiration_date = ""
+                terms = ""
+                if not skip_extras:
+                    # Expiration_Date pré-extraite depuis la page listing (lookup par titre)
+                    if title and title in title_to_expiry:
+                        expiry_raw = title_to_expiry[title]
+                        if expiry_raw:
+                            if expiry_raw.lower().startswith("ends "):
+                                expiration_date = expiry_raw[5:].strip()
+                            else:
+                                expiration_date = expiry_raw
+
+                    # Extraire Terms depuis la popup (clic sur "Terms and conditions")
+                    try:
+                        terms_btn = new_page.locator("button[data-qa='el:offerTerms']").first
+                        terms_btn.wait_for(state="visible", timeout=1500)
+                        terms_btn.click()
+                        new_page.wait_for_timeout(300)
+                        terms_elem = new_page.locator("div[data-qa='el:visibleTerms']").first
+                        if terms_elem.count() > 0:
+                            terms = terms_elem.inner_text().strip()
+                    except:
+                        pass
+
                 # N'ajouter que si code ET titre sont trouvés ET pas Exclusive
                 if code and title and not is_exclusive and code not in processed_codes and title not in processed_titles:
                     processed_codes.add(code)
                     processed_titles.add(title)
-                    results.append({"code": code, "title": title})
+                    results.append({"code": code, "title": title, "expiration_date": expiration_date, "terms": terms})
                     print(f"[VoucherCodes] ✅ Code: {code} | {title[:50]}...")
+                    print(f"[VoucherCodes]    📅 Expiry: {expiration_date if expiration_date else 'N/A'} | 📋 Terms: {'Yes' if terms else 'No'}")
                 else:
                     # Logger pourquoi le code n'est pas ajouté
                     if not code:
@@ -235,6 +293,9 @@ def scrape_vouchercodes_all(page, context, url):
 
 def main():
     """Scrape VoucherCodes UK depuis Google Sheets"""
+    skip_extras = "--legacy" in sys.argv
+    if skip_extras:
+        print(f"⚡ Mode legacy: skip Expiration_Date + Terms")
     print(f"📖 Chargement depuis Google Sheets...")
     
     # Charger les URLs depuis Google Sheets
@@ -267,7 +328,7 @@ def main():
             page = context.new_page()
             
             try:
-                codes = scrape_vouchercodes_all(page, context, url)
+                codes = scrape_vouchercodes_all(page, context, url, skip_extras=skip_extras)
                 print(f"   ✅ {len(codes)} codes trouvés")
 
                 for code_info in codes:
@@ -280,7 +341,9 @@ def main():
                         "Competitor_Source": "vouchercodes",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Title": code_info["title"]
+                        "Expiration_Date": code_info["expiration_date"],
+                        "Title": code_info["title"],
+                        "Terms": code_info["terms"]
                     })
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")
@@ -304,7 +367,7 @@ def main():
     
     if all_results:
         # Écriture directe dans Google Sheets
-        append_to_gsheet(all_results, source_name="VoucherCodes UK")
+        append_to_gsheet(all_results, source_name="VoucherCodes UK", legacy=skip_extras)
         
         print(f"\n{'='*60}")
         print(f"✅ VOUCHERCODES UK TERMINÉ!")

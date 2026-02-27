@@ -58,7 +58,7 @@ def scrape_simplycodes_all(page, context, url):
             }""")
             
             if popup_code and popup_title and popup_code not in ['Show Code', 'Copy', 'Copied!']:
-                results.append({"code": popup_code, "title": popup_title})
+                results.append({"code": popup_code, "title": popup_title, "terms": "", "expiration_date": ""})
         except:
             pass
         
@@ -91,6 +91,54 @@ def scrape_simplycodes_all(page, context, url):
             except:
                 break
         
+        # Cliquer tous les "See X code verifications" fermés pour révéler les terms
+        try:
+            for _ in range(50):
+                closed_toggles = new_page.locator("article.bg-gray-700:has(p:text('code verifications')):has(span.rotate-0)")
+                if closed_toggles.count() == 0:
+                    break
+                try:
+                    closed_toggles.first.scroll_into_view_if_needed()
+                    closed_toggles.first.click(timeout=1000)
+                    new_page.wait_for_timeout(200)
+                except:
+                    break
+            new_page.wait_for_timeout(300)
+        except:
+            pass
+
+        # Pré-extraire title→terms depuis la page AVANT extraction des codes
+        title_to_terms = {}
+        title_terms_data = new_page.evaluate("""() => {
+            const pairs = [];
+            document.querySelectorAll("[data-testid='promotion-copy-code-button']").forEach(btn => {
+                let card = btn;
+                for (let i = 0; i < 10; i++) {
+                    card = card.parentElement;
+                    if (!card) break;
+                    const titleEl = card.querySelector("[data-testid='promotion-subtitle']");
+                    if (titleEl) {
+                        const title = titleEl.textContent.trim();
+                        // Chercher l'article terms (contient des h4, pas le toggle bg-gray-700)
+                        const articles = card.querySelectorAll('article');
+                        let terms = '';
+                        for (const art of articles) {
+                            if (art.querySelector('h4')) {
+                                terms = art.textContent.trim();
+                                break;
+                            }
+                        }
+                        pairs.push([title, terms]);
+                        break;
+                    }
+                }
+            });
+            return pairs;
+        }""")
+        for pair in title_terms_data:
+            if pair[0]:
+                title_to_terms[pair[0]] = pair[1]
+
         # EXTRACTION COMPLÈTE VIA JAVASCRIPT - INSTANTANÉ
         all_codes = new_page.evaluate("""() => {
             const results = [];
@@ -118,14 +166,24 @@ def scrape_simplycodes_all(page, context, url):
             return results;
         }""")
         
-        # Dédupliquer
+        # Dédupliquer et associer les terms
         seen = {r["code"] for r in results}
         for item in all_codes:
             code = item.get('code')
             title = item.get('title')
             if code and title and code not in seen:
                 seen.add(code)
-                results.append({"code": code, "title": title})
+                terms = title_to_terms.get(title, '')
+                results.append({"code": code, "title": title, "terms": terms, "expiration_date": ""})
+
+        # Mettre à jour les terms du premier code (extrait de la popup avant les toggles)
+        if results and not results[0].get("terms") and results[0]["title"] in title_to_terms:
+            results[0]["terms"] = title_to_terms[results[0]["title"]]
+
+        # Logs
+        for r in results:
+            print(f"[SimplyCodes] ✅ Code: {r['code']} | {r['title'][:50]}...")
+            print(f"[SimplyCodes]    📋 Terms: {'Yes' if r['terms'] else 'No'}")
         
         # Fermer le nouvel onglet
         if new_page != page:
@@ -180,7 +238,9 @@ def main():
                         "Competitor_Source": "simplycodes",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Title": code_info["title"]
+                        "Expiration_Date": code_info["expiration_date"],
+                        "Title": code_info["title"],
+                        "Terms": code_info["terms"]
                     })
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")

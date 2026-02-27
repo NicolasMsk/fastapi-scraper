@@ -129,18 +129,19 @@ def get_gspread_client():
     return client
 
 
-def append_to_gsheet(results: list, source_name: str = None, skip_cleaning: bool = False):
+def append_to_gsheet(results: list, source_name: str = None, skip_cleaning: bool = False, legacy: bool = False):
     """
     Ajoute les résultats de scraping dans la Google Sheet Missing_Code.
     Applique automatiquement le nettoyage sauf si skip_cleaning=True.
-    
+
     Args:
         results: Liste de dictionnaires avec les données scrappées.
                  Chaque dict doit avoir: Date, Country, Merchant_ID, Merchant_slug,
                  GPN_URL, Competitor_Source, Competitor_URL, Code, Title
         source_name: Nom de la source pour le logging (optionnel)
         skip_cleaning: Si True, n'applique pas le nettoyage (défaut: False)
-    
+        legacy: Si True, écrit sans les colonnes Expiration_Date et Terms (11 colonnes)
+
     Returns:
         int: Nombre de lignes ajoutées
     """
@@ -163,29 +164,41 @@ def append_to_gsheet(results: list, source_name: str = None, skip_cleaning: bool
         spreadsheet = client.open_by_key(MISSING_CODE_SPREADSHEET_ID)
         worksheet = spreadsheet.worksheet(MISSING_CODE_SHEET_NAME)
         
-        # Colonnes attendues dans l'ordre (doit correspondre au spreadsheet)
-        columns = [
-            "Date", "Country", "Merchant_ID", "Merchant_slug", "GPN_URL",
-            "Competitor_Source", "Competitor_URL", "Code", "Title",
-            "Actioned by", "Comments"
-        ]
-
         # Préparer les lignes à ajouter
         rows_to_add = []
         for result in results:
-            row = [
-                result.get("Date", datetime.now().strftime("%Y-%m-%d")),
-                result.get("Country", ""),
-                result.get("Merchant_ID", ""),
-                result.get("Merchant_slug", ""),
-                result.get("GPN_URL", ""),
-                result.get("Competitor_Source", ""),
-                result.get("Competitor_URL", ""),
-                result.get("Code", ""),
-                result.get("Title", ""),
-                "",  # Actioned by - laissé vide pour remplissage manuel
-                ""   # Comments - laissé vide pour remplissage manuel
-            ]
+            if legacy:
+                # 11 colonnes (ancien format sans Expiration_Date et Terms)
+                row = [
+                    result.get("Date", datetime.now().strftime("%Y-%m-%d")),
+                    result.get("Country", ""),
+                    result.get("Merchant_ID", ""),
+                    result.get("Merchant_slug", ""),
+                    result.get("GPN_URL", ""),
+                    result.get("Competitor_Source", ""),
+                    result.get("Competitor_URL", ""),
+                    result.get("Code", ""),
+                    result.get("Title", ""),
+                    "",  # Actioned by
+                    ""   # Comments
+                ]
+            else:
+                # 13 colonnes (nouveau format avec Expiration_Date et Terms)
+                row = [
+                    result.get("Date", datetime.now().strftime("%Y-%m-%d")),
+                    result.get("Country", ""),
+                    result.get("Merchant_ID", ""),
+                    result.get("Merchant_slug", ""),
+                    result.get("GPN_URL", ""),
+                    result.get("Competitor_Source", ""),
+                    result.get("Competitor_URL", ""),
+                    result.get("Code", ""),
+                    result.get("Expiration_Date", ""),
+                    result.get("Title", ""),
+                    result.get("Terms", ""),
+                    "",  # Actioned by
+                    ""   # Comments
+                ]
             rows_to_add.append(row)
         
         # Ajouter toutes les lignes d'un coup (plus efficace)

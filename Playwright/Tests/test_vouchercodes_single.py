@@ -9,8 +9,7 @@ from playwright.sync_api import sync_playwright
 def scrape_vouchercodes_test(page, context, url):
     """Scrape tous les codes d'une page VoucherCodes avec Playwright"""
     results = []
-    affiliate_link = None
-    
+
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
@@ -33,7 +32,7 @@ def scrape_vouchercodes_test(page, context, url):
         print(f"[VoucherCodes] {count} boutons 'Get Code' trouvés")
         
         if count == 0:
-            return results, affiliate_link
+            return results
         
         processed_codes = set()
         processed_titles = set()
@@ -49,21 +48,7 @@ def scrape_vouchercodes_test(page, context, url):
         new_page = new_page_info.value
         new_page.wait_for_load_state("domcontentloaded")
         new_page.wait_for_timeout(2000)
-        
-        # === CAPTURE DU LIEN AFFILIÉ ===
-        # La page originale se redirige vers le site marchand
-        try:
-            # Attendre que l'URL change (ne soit plus vouchercodes)
-            for _ in range(10):  # Max 5 secondes
-                current_url = page.url
-                if "vouchercodes.co.uk" not in current_url:
-                    affiliate_link = current_url
-                    print(f"[VoucherCodes] ✅ Affiliate link: {affiliate_link[:80]}...")
-                    break
-                page.wait_for_timeout(500)
-        except Exception as e:
-            print(f"[VoucherCodes] ⚠️ Erreur capture affiliate: {e}")
-        
+
         # Itérer sur tous les codes (on en a détecté 'count' au départ)
         # Pattern d'indexation: 0, 0, 1, 2, 3, ..., N-2
         for iteration in range(count):
@@ -118,7 +103,7 @@ def scrape_vouchercodes_test(page, context, url):
                 if code and title and not is_exclusive and code not in processed_codes and title not in processed_titles:
                     processed_codes.add(code)
                     processed_titles.add(title)
-                    results.append({"code": code, "title": title, "affiliate_link": affiliate_link})
+                    results.append({"code": code, "title": title})
                     print(f"[VoucherCodes] ✅ Code: {code} | {title[:50]}...")
                 else:
                     # Logger pourquoi le code n'est pas ajouté
@@ -203,8 +188,8 @@ def scrape_vouchercodes_test(page, context, url):
         
     except Exception as e:
         print(f"[VoucherCodes] ❌ Erreur: {str(e)[:50]}")
-    
-    return results, affiliate_link
+
+    return results
 
 
 def main():
@@ -225,16 +210,14 @@ def main():
         )
         page = context.new_page()
         
-        results, affiliate_link = scrape_vouchercodes_test(page, context, test_url)
-        
+        results = scrape_vouchercodes_test(page, context, test_url)
+
         browser.close()
-    
+
     print("\n" + "=" * 60)
     print("RÉSULTATS")
     print("=" * 60)
-    
-    print(f"\n🔗 AFFILIATE LINK: {affiliate_link or 'Non capturé'}\n")
-    
+
     if results:
         for i, r in enumerate(results, 1):
             print(f"{i}. Code: {r['code']}")

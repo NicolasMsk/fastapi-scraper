@@ -5,6 +5,7 @@ Script Playwright pour scraper TOUS les codes RetailMeNot (US)
 """
 
 import os
+import re
 import sys
 from datetime import datetime
 from playwright.sync_api import sync_playwright
@@ -38,16 +39,67 @@ def scrape_retailmenot_all(page, context, url):
         
         if count == 0:
             return results
-        
+
+        # Scroll de la page listing pour charger tous les codes
+        last_height = page.evaluate("document.body.scrollHeight")
+        while True:
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(1000)
+            new_height = page.evaluate("document.body.scrollHeight")
+            if new_height == last_height:
+                break
+            last_height = new_height
+
+        page.evaluate("window.scrollTo(0, 0)")
+        page.wait_for_timeout(1000)
+
+        # Cliquer tous les "See Details" sur la page listing (Alpine.js)
+        try:
+            for _ in range(50):
+                see_details = page.locator("span:text-is('See Details')")
+                if see_details.count() == 0:
+                    break
+                try:
+                    see_details.first.click(timeout=1000)
+                    page.wait_for_timeout(150)
+                except:
+                    break
+            page.wait_for_timeout(300)
+        except:
+            pass
+
+        # Pré-extraire title→terms depuis la page listing AVANT de cliquer
+        title_to_terms = {}
+        title_terms_pairs = page.evaluate("""
+            () => {
+                var pairs = [];
+                var offers = document.querySelectorAll('a[data-component-class="offer_strip"]');
+                offers.forEach(function(offer) {
+                    var titleH3 = offer.querySelector('h3');
+                    var title = titleH3 ? titleH3.textContent.trim() : '';
+                    var parentDiv = offer.parentElement;
+                    var termsDiv = parentDiv ? parentDiv.querySelector('details div.prose') : null;
+                    var terms = termsDiv ? termsDiv.textContent.trim() : '';
+                    if (title) {
+                        pairs.push([title, terms]);
+                    }
+                });
+                return pairs;
+            }
+        """)
+        for pair in title_terms_pairs:
+            if pair[0]:
+                title_to_terms[pair[0]] = pair[1]
+
         # Cliquer sur la première offre pour révéler les codes
         first_offer = offer_links.first
         first_offer.scroll_into_view_if_needed()
         page.wait_for_timeout(500)
-        
+
         # Gérer le nouvel onglet potentiel
         with context.expect_page() as new_page_info:
             first_offer.click()
-        
+
         try:
             new_page = new_page_info.value
             new_page.wait_for_load_state("domcontentloaded")
@@ -61,40 +113,27 @@ def scrape_retailmenot_all(page, context, url):
                 work_page = page
         except:
             work_page = page
-        
+
         page.wait_for_timeout(2000)
-        
-        # Scroll de la page pour charger tous les codes
-        last_height = work_page.evaluate("document.body.scrollHeight")
-        while True:
-            work_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            work_page.wait_for_timeout(1000)
-            new_height = work_page.evaluate("document.body.scrollHeight")
-            if new_height == last_height:
-                break
-            last_height = new_height
-        
-        work_page.evaluate("window.scrollTo(0, 0)")
-        work_page.wait_for_timeout(1000)
-        
-        # Récupérer tous les codes via JavaScript (même script que FastAPI)
+
+        # Récupérer tous les codes + titres via JavaScript
         codes_data = work_page.evaluate("""
             () => {
                 var results = [];
                 var offers = document.querySelectorAll('a[data-component-class="offer_strip"]');
-                
+
                 offers.forEach(function(offer) {
                     var codeDiv = offer.querySelector('div.font-bold.tracking-wider');
                     var code = codeDiv ? codeDiv.textContent.trim() : null;
-                    
+
                     var titleH3 = offer.querySelector('h3');
                     var title = titleH3 ? titleH3.textContent.trim() : null;
-                    
+
                     if (code && title && code.length >= 3) {
                         results.push({code: code, title: title});
                     }
                 });
-                
+
                 return results;
             }
         """)
@@ -102,25 +141,46 @@ def scrape_retailmenot_all(page, context, url):
         # Filtrer les faux codes et doublons (uniquement sur le code)
         processed_codes = set()
         
+        # Regex pour trouver des dates dans le texte des terms
+        months_pattern = r'(?:January|February|March|April|May|June|July|August|September|October|November|December)'
+
         for item in codes_data:
             code = item['code']
             title = item['title']
-            
+            terms = title_to_terms.get(title, '')
+
             # Ignorer les faux codes
             if code.lower() in ['get deal', 'see deal', 'show deal', 'view deal']:
                 continue
-            
+
             # Vérifier uniquement si le code est un doublon
             if code in processed_codes:
                 continue
-            
+
+            # Extraire expiration_date depuis le texte des terms
+            expiration_date = ""
+            if terms:
+                dates = []
+                # MM/DD/YYYY ou DD/MM/YYYY
+                dates.extend(re.findall(r'\d{1,2}/\d{1,2}/\d{2,4}', terms))
+                # Month DDth, YYYY
+                dates.extend(re.findall(rf'{months_pattern}\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s*\d{{4}}', terms, re.IGNORECASE))
+                # DD Month YYYY
+                dates.extend(re.findall(rf'\d{{1,2}}\s+{months_pattern},?\s+\d{{4}}', terms, re.IGNORECASE))
+                if dates:
+                    expiration_date = dates[-1]  # Dernière date = date de fin
+
             # N'ajouter que si code ET titre sont présents
             if code and title:
                 processed_codes.add(code)
                 results.append({
                     "code": code,
-                    "title": title
+                    "title": title,
+                    "terms": terms,
+                    "expiration_date": expiration_date
                 })
+                print(f"[RetailMeNot] ✅ Code: {code} | {title[:50]}...")
+                print(f"[RetailMeNot]    📅 Expiry: {expiration_date if expiration_date else 'N/A'} | 📋 Terms: {'Yes' if terms else 'No'}")
         
         # Fermer le nouvel onglet si on en a ouvert un
         if work_page != page:
@@ -175,7 +235,9 @@ def main():
                         "Competitor_Source": "retailmenot",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Title": code_info["title"]
+                        "Expiration_Date": code_info["expiration_date"],
+                        "Title": code_info["title"],
+                        "Terms": code_info["terms"]
                     })
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")

@@ -9,5 +9,11 @@ playwright>=1.40.0
 gspread>=5.12.0
 google-auth>=2.23.0
 
+# BigQuery + Google Drive API (code_matcher)
+pandas
+numpy
+google-cloud-bigquery
+google-api-python-client
+
 # Utilitaires
 python-dateutil>=2.8.2

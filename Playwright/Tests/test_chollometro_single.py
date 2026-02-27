@@ -9,9 +9,8 @@ import time
 def test_chollometro_single(url):
     """Test scraping sur une seule URL Chollometro"""
     results = []
-    affiliate_link = None
     start_time = time.time()
-    
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)  # headless=False pour voir
         context = browser.new_context(
@@ -70,18 +69,6 @@ def test_chollometro_single(url):
 
             print("[Chollometro] Switché vers le nouvel onglet")
 
-            # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
-            try:
-                for _ in range(10):
-                    current_url = page.url
-                    if "chollometro" not in current_url.lower():
-                        affiliate_link = current_url
-                        print(f"[Chollometro] Lien affilié capturé: {affiliate_link[:60]}...")
-                        break
-                    page.wait_for_timeout(500)
-            except Exception as e:
-                print(f"[Chollometro] ⚠️ Erreur capture affiliate: {str(e)[:40]}")
-            
             max_iterations = count + 5
             
             for iteration in range(max_iterations):
@@ -132,7 +119,7 @@ def test_chollometro_single(url):
                 if code and current_title and code not in processed_codes and current_title not in processed_titles:
                     processed_codes.add(code)
                     processed_titles.add(current_title)
-                    results.append({"code": code, "title": current_title, "affiliate_link": affiliate_link})
+                    results.append({"code": code, "title": current_title})
                     print(f"[Chollometro] ✅ Code: {code} -> {current_title[:40]}...")
                 else:
                     print(f"[Chollometro] ⚠️ Code/titre non trouvé ou doublon")
@@ -212,8 +199,6 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print(f"RÉSULTATS: {len(results)} codes en {elapsed:.1f}s")
     print("=" * 60)
-    if results:
-        print(f"Affiliate Link: {results[0].get('affiliate_link', 'N/A')}\n")
     for i, r in enumerate(results):
         print(f"  [{i+1}] {r['code']} -> {r['title'][:50]}...")
     print("=" * 60)

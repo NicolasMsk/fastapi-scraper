@@ -1,7 +1,6 @@
 """
-Playwright script to scrape ALL coupon codes from HotUKDeals (UK)
-- Faster and more stable than Selenium
-- Extracts unique HotUKDeals URLs from CSV
+Playwright script to scrape ALL coupon codes from Pepper.pl (Poland)
+- Based on HotUKDeals scraper (same Pepper platform)
 - Retrieves ALL codes from each page
 - EXCLUDES similar merchants and expired codes
 """
@@ -17,14 +16,14 @@ from gsheet_loader import get_competitor_urls, load_competitors_data
 from gsheet_writer import append_to_gsheet
 
 
-def scrape_hotukdeals_all(page, context, url):
+def scrape_pepper_all(page, context, url):
     """
-    Scrape all codes from a HotUKDeals page using Playwright.
-    
+    Scrape all codes from a Pepper.pl page using Playwright.
+
     IMPORTANT: We EXCLUDE:
     - div._1hla7140 = "Active vouchers for retailers similar to..."
     - div.jkau50 = "Great discounts that have expired..."
-    
+
     We only keep codes from the main merchant (with h3 = not expired)
     """
     results = []
@@ -32,90 +31,68 @@ def scrape_hotukdeals_all(page, context, url):
     try:
         # Navigate to page with domcontentloaded strategy
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(1500)  # Réduit de 3000 à 1500
-        
+        page.wait_for_timeout(1500)
+
         # Close cookie consent popups
         try:
-            page.click("button:has-text('Accept'), button:has-text('Agree'), #onetrust-accept-btn-handler", timeout=2000)
-            page.wait_for_timeout(500)  # Réduit de 1000 à 500
+            page.click("button:has-text('Accept'), button:has-text('Agree'), button:has-text('Akceptuj'), #onetrust-accept-btn-handler", timeout=2000)
+            page.wait_for_timeout(500)
         except:
             pass
-        
+
         # ===================================================================
         # XPath to find VALID "See Code" buttons:
         # 1. Inside a card with h3 (not expired)
         # 2. NOT in the "similar vouchers" container (_1hla7140)
         # 3. NOT in the "expired" container (jkau50 with h2 containing "expired")
-        # 4. NOT "Exclusive" offers (exclude cards with "Exclusive" label)
+        # 4. NOT "Exclusive" offers
         # ===================================================================
         xpath_valid_codes = """
             //div[@data-testid='vouchers-ui-voucher-card-description'][.//h3]
                 [not(ancestor::div[contains(@class, '_1hla7140')])]
-                [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired')]])]
+                [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired') or contains(text(), 'wygasł')]])]
                 [not(ancestor::div[@data-testid='vouchers-ui-voucher-card']//div[contains(text(), 'Exclusive')])]
-            //div[@role='button' and contains(@title, 'See Code')]
+            //div[@role='button' and (contains(@title, 'See Code') or contains(@title, 'Zobacz kod') or contains(@title, 'Pokaż kod'))]
         """.replace('\n', '').replace('    ', '')
-        
+
         # Locate all valid "See Code" buttons
         see_code_buttons = page.locator(f"xpath={xpath_valid_codes}")
         total_count = see_code_buttons.count()
-        
+
         if total_count == 0:
             return results
 
         print(f"      {total_count} valid codes found")
 
-        # Pré-extraire un dict titre→expiry depuis la page listing (avant de cliquer)
-        title_to_expiry = {}
-        title_expiry_pairs = page.evaluate("""
-            () => {
-                const cards = document.querySelectorAll("div[data-testid='vouchers-ui-voucher-card-description']");
-                return Array.from(cards).filter(c => c.querySelector("h3")).map(card => {
-                    const title = card.querySelector("h3").innerText.trim();
-                    let expiry = '';
-                    const parentCard = card.closest("[data-testid='vouchers-ui-voucher-card']") || card;
-                    const spans = parentCard.querySelectorAll("span");
-                    for (const s of spans) {
-                        const t = s.innerText.trim();
-                        if (t.toLowerCase().startsWith('expir')) { expiry = t; break; }
-                    }
-                    return [title, expiry];
-                });
-            }
-        """)
-        for pair in title_expiry_pairs:
-            if pair[0]:
-                title_to_expiry[pair[0]] = pair[1]
-
         # Track processed codes and titles to avoid duplicates
         processed_codes = set()
-        processed_titles = set()  # Avoid duplicate titles as well
-        
+        processed_titles = set()
+
         # === STEP 1: Click on first button to open new tab ===
         first_btn = see_code_buttons.first
         first_btn.scroll_into_view_if_needed()
-        page.wait_for_timeout(300)  # Réduit de 500 à 300
-        
+        page.wait_for_timeout(300)
+
         # Click using JavaScript evaluation
         pages_before = len(context.pages)
         page.evaluate("(el) => el.click()", first_btn.element_handle())
-        page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
-        
+        page.wait_for_timeout(1000)
+
         # Verify new tab opened
         if len(context.pages) <= pages_before:
             return results
 
         # Switch to new tab
         new_page = context.pages[-1]
-        new_page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
+        new_page.wait_for_timeout(1000)
 
         # === STEP 2: Loop through all codes on new tab ===
         max_iterations = min(total_count + 5, 25)
-        
+
         for iteration in range(max_iterations):
             try:
-                new_page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
-                
+                new_page.wait_for_timeout(1000)
+
                 # STEP 1: Extract code (h4 with class b8qpi*)
                 code = None
                 try:
@@ -124,7 +101,7 @@ def scrape_hotukdeals_all(page, context, url):
                         code = code_elem.inner_text().strip()
                 except:
                     pass
-                
+
                 # Fallback: search all h4 elements for valid code
                 if not code:
                     try:
@@ -136,7 +113,7 @@ def scrape_hotukdeals_all(page, context, url):
                                 break
                     except:
                         pass
-                
+
                 # STEP 2: Extract title from POPUP (h4.az57m without b8qpi)
                 current_title = None
                 try:
@@ -145,7 +122,7 @@ def scrape_hotukdeals_all(page, context, url):
                         current_title = title_elems.first.inner_text().strip()
                 except:
                     pass
-                
+
                 # Fallback: get title from card h3 element
                 if not current_title:
                     try:
@@ -155,96 +132,82 @@ def scrape_hotukdeals_all(page, context, url):
                             current_title = h3_elems.nth(idx).inner_text().strip()
                     except:
                         pass
-                
-                # Expiration_Date pré-extraite depuis la page listing (lookup par titre)
-                expiration_date = ""
-                if current_title and current_title in title_to_expiry:
-                    expiry_raw = title_to_expiry[current_title]
-                    if expiry_raw:
-                        if expiry_raw.lower().startswith("expiration date: "):
-                            expiration_date = expiry_raw[17:].strip()
-                        elif expiry_raw.lower().startswith("expires "):
-                            expiration_date = expiry_raw[8:].strip()
-                        else:
-                            expiration_date = expiry_raw
 
                 # Only add if both code AND title are found (no default values)
                 if code and current_title and code not in processed_codes and current_title not in processed_titles:
                     processed_codes.add(code)
                     processed_titles.add(current_title)
-                    results.append({"code": code, "title": current_title, "expiration_date": expiration_date})
-                    print(f"[HotUKDeals] ✅ Code: {code} | {current_title[:50]}...")
-                    print(f"[HotUKDeals]    📅 Expiry: {expiration_date if expiration_date else 'N/A'}")
-                
+                    results.append({"code": code, "title": current_title})
+                    print(f"[Pepper] ✅ Code: {code} | {current_title[:50]}...")
+
                 # STEP 3: Close the popup
                 try:
                     close_icon = new_page.locator("span[data-testid='CloseIcon'], svg[data-testid='CloseIcon']").first
                     if close_icon.count() > 0:
                         close_icon.click(timeout=2000)
-                        new_page.wait_for_timeout(500)  # Réduit de 1000 à 500
+                        new_page.wait_for_timeout(500)
                 except:
                     pass
-                
+
                 # STEP 4: Find next button (with same exclusions)
-                new_page.wait_for_timeout(300)  # Réduit de 500 à 300
-                
+                new_page.wait_for_timeout(300)
+
                 xpath_next = """
                     //div[@data-testid='vouchers-ui-voucher-card-description'][.//h3]
                         [not(ancestor::div[contains(@class, '_1hla7140')])]
-                        [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired')]])]
+                        [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired') or contains(text(), 'wygasł')]])]
                         [not(ancestor::div[@data-testid='vouchers-ui-voucher-card']//div[contains(text(), 'Exclusive')])]
-                    //div[@role='button' and contains(@title, 'See Code')]
+                    //div[@role='button' and (contains(@title, 'See Code') or contains(@title, 'Zobacz kod') or contains(@title, 'Pokaż kod'))]
                 """.replace('\n', '').replace('    ', '')
-                
+
                 # Get all valid buttons
                 next_buttons = new_page.locator(f"xpath={xpath_next}")
                 current_index = len(results)
-                
-                # Check if we've processed all available codes
+
                 # Get button at current index
                 next_btn = next_buttons.nth(current_index)
                 next_btn.scroll_into_view_if_needed()
-                new_page.wait_for_timeout(200)  # Réduit de 300 à 200
-                
+                new_page.wait_for_timeout(200)
+
                 # Click button using JavaScript
                 pages_before = len(context.pages)
                 new_page.evaluate("(el) => el.click()", next_btn.element_handle())
-                new_page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
-                
+                new_page.wait_for_timeout(1000)
+
                 # If a new tab opened, switch to it
                 if len(context.pages) > pages_before:
                     new_page = context.pages[-1]
-                    new_page.wait_for_timeout(500)  # Réduit de 1000 à 500
-                
+                    new_page.wait_for_timeout(500)
+
             except Exception as e:
                 # Exit loop if any error occurs
                 break
-        
+
         # Close all opened tabs except the main one
         for p in context.pages[1:]:
             try:
                 p.close()
             except:
                 pass
-        
+
     except Exception as e:
         print(f"      ❌ Error: {str(e)[:50]}")
-    
+
     return results
 
 
 def main():
-    """Scrape HotUKDeals UK depuis Google Sheets"""
+    """Scrape Pepper PL depuis Google Sheets"""
     print(f"📖 Chargement depuis Google Sheets...")
-    
+
     # Charger les URLs depuis Google Sheets
-    competitor_data = get_competitor_urls("UK", "hotukdeals")
-    print(f"📍 HotUKDeals: {len(competitor_data)} URLs uniques")
-    
+    competitor_data = get_competitor_urls("PL", "pepper")
+    print(f"📍 Pepper: {len(competitor_data)} URLs uniques")
+
     all_results = []
-    
+
     print(f"\n🚀 Launching Playwright...")
-    
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -252,43 +215,42 @@ def main():
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         )
         page = context.new_page()
-        
+
         for idx, (merchant_row, url) in enumerate(competitor_data, 1):
             merchant_slug = merchant_row.get('Merchant_slug', 'Unknown')
-            
+
             print(f"\n[{idx}/{len(competitor_data)}] 🏪 {merchant_slug}")
             print(f"   URL: {url[:60]}...")
-            
+
             try:
-                codes = scrape_hotukdeals_all(page, context, url)
+                codes = scrape_pepper_all(page, context, url)
                 print(f"   ✅ {len(codes)} codes found")
 
                 for code_info in codes:
                     all_results.append({
                         "Date": datetime.now().strftime("%Y-%m-%d"),
-                        "Country": "UK",
+                        "Country": "PL",
                         "Merchant_ID": merchant_row.get("Merchant_ID", ""),
                         "Merchant_slug": merchant_slug,
                         "GPN_URL": merchant_row.get("GPN_URL", ""),
-                        "Competitor_Source": "hotukdeals",
+                        "Competitor_Source": "pepper",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Expiration_Date": code_info["expiration_date"],
                         "Title": code_info["title"]
                     })
             except Exception as e:
                 print(f"   ❌ Error: {str(e)[:50]}")
-            
+
             print(f"   📝 Total: {len(all_results)} codes")
-        
+
         browser.close()
-    
+
     if all_results:
         # Écriture directe dans Google Sheets
-        append_to_gsheet(all_results, source_name="HotUKDeals UK")
-        
+        append_to_gsheet(all_results, source_name="Pepper PL")
+
         print(f"\n{'='*60}")
-        print(f"✅ HOTUKDEALS UK COMPLETED!")
+        print(f"✅ PEPPER PL COMPLETED!")
         print(f"📊 {len(all_results)} codes retrieved and sent to Google Sheets")
         print(f"{'='*60}")
     else:

@@ -13,7 +13,6 @@ from playwright.sync_api import sync_playwright
 def test_sparwelt_single(url):
     """Test scraping sur une seule URL Sparwelt"""
     results = []
-    affiliate_link = None
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
@@ -69,18 +68,6 @@ def test_sparwelt_single(url):
                 work_page = page
                 print(f"[Sparwelt] Pas de nouvel onglet, on reste sur la page")
 
-            # CAPTURE DU LIEN AFFILIÉ - La page ORIGINALE se redirige vers le marchand
-            try:
-                for _ in range(10):
-                    current_url = page.url
-                    if "sparwelt" not in current_url.lower():
-                        affiliate_link = current_url
-                        print(f"[Sparwelt] Lien affilié capturé: {affiliate_link[:60]}...")
-                        break
-                    page.wait_for_timeout(500)
-            except Exception as e:
-                print(f"[Sparwelt] ⚠️ Erreur capture affiliate: {str(e)[:40]}")
-
             # === ÉTAPE 2: Boucle sur work_page ===
             max_iterations = 20
             
@@ -123,8 +110,7 @@ def test_sparwelt_single(url):
                     processed_codes.add(code)
                     results.append({
                         "code": code,
-                        "title": current_title,
-                        "affiliate_link": affiliate_link
+                        "title": current_title
                     })
                     print(f"[Sparwelt] ✅ Ajouté: {code}")
                 
@@ -215,7 +201,6 @@ def main():
     print("=" * 60)
     
     if results:
-        print(f"Affiliate Link: {results[0].get('affiliate_link', 'N/A')}\n")
         for i, r in enumerate(results, 1):
             print(f"{i}. Code: {r['code']}")
             print(f"   Titre: {r['title']}")
