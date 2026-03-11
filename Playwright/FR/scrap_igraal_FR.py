@@ -38,10 +38,56 @@ def scrape_igraal_all(page, context, url):
         # Trouver tous les boutons "Afficher le code"
         code_buttons = page.locator("button:has-text('Afficher le code')")
         count = code_buttons.count()
-        
+
         if count == 0:
             return results
-        
+
+        # Pré-extraire terms + expiry AVANT de cliquer sur les codes
+        # 1. Cliquer sur tous les boutons "Conditions" pour révéler les terms
+        cond_buttons = page.locator("div.horizontalbasecard.stt-vld:not(.stt-exp) button.gpew711")
+        cond_count = cond_buttons.count()
+        for i in range(cond_count):
+            try:
+                btn = cond_buttons.nth(i)
+                btn.scroll_into_view_if_needed()
+                btn.click()
+                page.wait_for_timeout(200)
+            except:
+                pass
+        page.wait_for_timeout(500)
+
+        # 2. Extraire le mapping titre -> {terms, expiry} via JS
+        title_extras = page.evaluate("""() => {
+            var mapping = {};
+            var cards = document.querySelectorAll('div.horizontalbasecard.stt-vld:not(.stt-exp)');
+            cards.forEach(function(card) {
+                var titleH3 = card.querySelector('h3._1t96igp3, h3#offerbasecard-title');
+                var title = titleH3 ? titleH3.textContent.trim() : '';
+                if (!title) return;
+
+                // Expiry: span contenant SVG alarm-clock
+                var expiry = '';
+                var spans = card.querySelectorAll('span._1fehs7y0');
+                spans.forEach(function(span) {
+                    if (span.querySelector('svg[aria-label="alarm-clock icon"]')) {
+                        expiry = span.textContent.trim();
+                    }
+                });
+
+                // Terms: div.gpew715 (révélé après clic sur Conditions)
+                var terms = '';
+                var termsDiv = card.querySelector('div.gpew715');
+                if (termsDiv) {
+                    terms = termsDiv.textContent.trim();
+                }
+
+                mapping[title] = {terms: terms, expiration_date: expiry};
+            });
+            return mapping;
+        }""")
+        if title_extras:
+            print(f"      {len(title_extras)} terms/expiry pré-extraits")
+
         # Cliquer sur le premier bouton pour révéler les codes
         first_btn = code_buttons.first
         first_btn.scroll_into_view_if_needed()
@@ -116,6 +162,7 @@ def scrape_igraal_all(page, context, url):
                     if (code && title) {
                         results.push({code: code, title: title});
                     }
+
                 });
                 
                 return results;
@@ -139,21 +186,24 @@ def scrape_igraal_all(page, context, url):
         for item in codes_data:
             code = item['code']
             title = item['title']
-            
+
             # Vérifier si c'est un vrai code promo
             if not is_real_code(code):
                 continue
-            
+
             # Vérifier uniquement si le code est un doublon
             if code in processed_codes:
                 continue
-            
+
             # N'ajouter que si code ET titre sont présents
             if code and title:
                 processed_codes.add(code)
+                extras = title_extras.get(title, {})
                 results.append({
                     "code": code,
-                    "title": title
+                    "title": title,
+                    "terms": extras.get("terms", ""),
+                    "expiration_date": extras.get("expiration_date", "")
                 })
         
         # Fermer le nouvel onglet si on en a ouvert un
@@ -228,7 +278,9 @@ def main():
                             "Competitor_Source": "igraal",
                             "Competitor_URL": url,
                             "Code": code_info["code"],
-                            "Title": code_info["title"]
+                            "Title": code_info["title"],
+                            "terms": code_info.get("terms", ""),
+                            "expiration_date": code_info.get("expiration_date", "")
                         })
                     break
                     

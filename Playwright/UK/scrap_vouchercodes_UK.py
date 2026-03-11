@@ -16,36 +16,13 @@ from gsheet_loader import get_competitor_urls, load_competitors_data
 from gsheet_writer import append_to_gsheet
 
 
-def scrape_vouchercodes_all(page, context, url, skip_extras=False):
+def scrape_vouchercodes_all(page, context, url):
     """Scrape tous les codes d'une page VoucherCodes avec Playwright"""
     results = []
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(1500)
-
-        # Vérifier et attendre si Cloudflare challenge est actif
-        for cloudflare_attempt in range(8):  # Max 8 secondes d'attente
-            page_title = page.title()
-            if "just a moment" in page_title.lower() or "checking" in page_title.lower():
-                print(f"[VoucherCodes] ⏳ Cloudflare challenge detected, waiting... ({cloudflare_attempt+1}/15)")
-                page.wait_for_timeout(1000)
-            else:
-                break
-
-        # DEBUG: Afficher le titre et l'URL de la page
-        try:
-            page_title = page.title()
-            final_url = page.url
-            print(f"[VoucherCodes] Page title: {page_title[:80]}...")
-            print(f"[VoucherCodes] Final URL: {final_url}")
-
-            # Si toujours sur Cloudflare après l'attente, abandonner ce marchand
-            if "just a moment" in page_title.lower():
-                print(f"[VoucherCodes] ❌ Cloudflare challenge not passed, skipping...")
-                return results
-        except Exception as e:
-            print(f"[VoucherCodes] ⚠️ Could not get page info: {str(e)[:30]}")
 
         # Fermer cookie banner
         try:
@@ -76,8 +53,7 @@ def scrape_vouchercodes_all(page, context, url, skip_extras=False):
 
         # Pré-extraire un dict titre→expiry depuis la page listing (avant de cliquer)
         title_to_expiry = {}
-        if not skip_extras:
-            title_expiry_pairs = page.evaluate("""
+        title_expiry_pairs = page.evaluate("""
                 () => {
                     let buttons = Array.from(document.querySelectorAll("button[data-qa='el:offerPrimaryButton']"))
                         .filter(b => b.textContent.toLowerCase().includes('get code'));
@@ -102,9 +78,9 @@ def scrape_vouchercodes_all(page, context, url, skip_extras=False):
                     });
                 }
             """)
-            for pair in title_expiry_pairs:
-                if pair[0]:
-                    title_to_expiry[pair[0]] = pair[1]
+        for pair in title_expiry_pairs:
+            if pair[0]:
+                title_to_expiry[pair[0]] = pair[1]
 
         processed_codes = set()
         processed_titles = set()
@@ -172,30 +148,29 @@ def scrape_vouchercodes_all(page, context, url, skip_extras=False):
                 except:
                     pass
 
-                # Expiration_Date et Terms (skip si --legacy)
+                # Expiration_Date et Terms
                 expiration_date = ""
                 terms = ""
-                if not skip_extras:
-                    # Expiration_Date pré-extraite depuis la page listing (lookup par titre)
-                    if title and title in title_to_expiry:
-                        expiry_raw = title_to_expiry[title]
-                        if expiry_raw:
-                            if expiry_raw.lower().startswith("ends "):
-                                expiration_date = expiry_raw[5:].strip()
-                            else:
-                                expiration_date = expiry_raw
+                # Expiration_Date pré-extraite depuis la page listing (lookup par titre)
+                if title and title in title_to_expiry:
+                    expiry_raw = title_to_expiry[title]
+                    if expiry_raw:
+                        if expiry_raw.lower().startswith("ends "):
+                            expiration_date = expiry_raw[5:].strip()
+                        else:
+                            expiration_date = expiry_raw
 
-                    # Extraire Terms depuis la popup (clic sur "Terms and conditions")
-                    try:
-                        terms_btn = new_page.locator("button[data-qa='el:offerTerms']").first
-                        terms_btn.wait_for(state="visible", timeout=1500)
-                        terms_btn.click()
-                        new_page.wait_for_timeout(300)
-                        terms_elem = new_page.locator("div[data-qa='el:visibleTerms']").first
-                        if terms_elem.count() > 0:
-                            terms = terms_elem.inner_text().strip()
-                    except:
-                        pass
+                # Extraire Terms depuis la popup (clic sur "Terms and conditions")
+                try:
+                    terms_btn = new_page.locator("button[data-qa='el:offerTerms']").first
+                    terms_btn.wait_for(state="visible", timeout=1500)
+                    terms_btn.click()
+                    new_page.wait_for_timeout(300)
+                    terms_elem = new_page.locator("div[data-qa='el:visibleTerms']").first
+                    if terms_elem.count() > 0:
+                        terms = terms_elem.inner_text().strip()
+                except:
+                    pass
 
                 # N'ajouter que si code ET titre sont trouvés ET pas Exclusive
                 if code and title and not is_exclusive and code not in processed_codes and title not in processed_titles:
@@ -293,9 +268,6 @@ def scrape_vouchercodes_all(page, context, url, skip_extras=False):
 
 def main():
     """Scrape VoucherCodes UK depuis Google Sheets"""
-    skip_extras = "--legacy" in sys.argv
-    if skip_extras:
-        print(f"⚡ Mode legacy: skip Expiration_Date + Terms")
     print(f"📖 Chargement depuis Google Sheets...")
     
     # Charger les URLs depuis Google Sheets
@@ -307,13 +279,10 @@ def main():
     print(f"\n🚀 Lancement de Playwright...")
     
     with sync_playwright() as p:
-        # Configuration Firefox pour contourner Cloudflare (moins détecté que Chromium)
-        browser = p.firefox.launch(headless=True)
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
-            locale="en-GB",
-            timezone_id="Europe/London"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         )
 
         page = context.new_page()
@@ -328,7 +297,7 @@ def main():
             page = context.new_page()
             
             try:
-                codes = scrape_vouchercodes_all(page, context, url, skip_extras=skip_extras)
+                codes = scrape_vouchercodes_all(page, context, url)
                 print(f"   ✅ {len(codes)} codes trouvés")
 
                 for code_info in codes:
@@ -341,9 +310,9 @@ def main():
                         "Competitor_Source": "vouchercodes",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Expiration_Date": code_info["expiration_date"],
                         "Title": code_info["title"],
-                        "Terms": code_info["terms"]
+                        "terms": code_info.get("terms", ""),
+                        "expiration_date": code_info.get("expiration_date", "")
                     })
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")
@@ -367,7 +336,7 @@ def main():
     
     if all_results:
         # Écriture directe dans Google Sheets
-        append_to_gsheet(all_results, source_name="VoucherCodes UK", legacy=skip_extras)
+        append_to_gsheet(all_results, source_name="VoucherCodes UK")
         
         print(f"\n{'='*60}")
         print(f"✅ VOUCHERCODES UK TERMINÉ!")

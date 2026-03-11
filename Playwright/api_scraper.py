@@ -22,12 +22,13 @@ app = FastAPI(
     
     ## Scrapers disponibles:
     - 🇦🇺 AU: Lifehacker, Cuponation
-    - 🇺🇸 US: RetailMeNot, SimplyCodes
+    - 🇺🇸 US: RetailMeNot, SimplyCodes, CouponFollow
     - 🇬🇧 UK: HotUKDeals, VoucherCodes
     - 🇩🇪 DE: MyDealz, Sparwelt
     - 🇫🇷 FR: iGraal, Ma-Reduc
     - 🇪🇸 ES: Chollometro, Cuponation
     - 🇮🇹 IT: Codice-Sconto, Cuponation
+    - 🇵🇱 PL: Pepper, Rabatio
     """,
     version="1.0.0"
 )
@@ -174,6 +175,33 @@ def scrape_simplycodes_us():
         scraper_status["last_result"] = f"❌ Erreur: {str(e)[:100]}"
         raise HTTPException(status_code=500, detail=str(e))
     
+    finally:
+        scraper_status["running"] = False
+
+
+@app.post("/scrape/us/couponfollow", tags=["🇺🇸 USA"])
+def scrape_couponfollow_us():
+    """🇺🇸 Lance le scraper CouponFollow USA."""
+    global scraper_status
+
+    if scraper_status["running"]:
+        raise HTTPException(status_code=409, detail="Un scraper est déjà en cours d'exécution")
+
+    try:
+        scraper_status["running"] = True
+        scraper_status["last_source"] = "CouponFollow US"
+        scraper_status["last_run"] = datetime.now().isoformat()
+
+        from US.scrap_couponfollow_US import main as scrape_couponfollow
+        scrape_couponfollow()
+
+        scraper_status["last_result"] = "✅ Succès"
+        return {"status": "success", "message": "Scraping CouponFollow US terminé"}
+
+    except Exception as e:
+        scraper_status["last_result"] = f"❌ Erreur: {str(e)[:100]}"
+        raise HTTPException(status_code=500, detail=str(e))
+
     finally:
         scraper_status["running"] = False
 
@@ -534,13 +562,14 @@ def scrape_group1():
 @app.post("/scrape/group2", tags=["📦 Groupes"])
 def scrape_group2():
     """
-    📦 Groupe 2: UK + US (4 scrapers)
-    
+    📦 Groupe 2: UK + US (5 scrapers)
+
     - 🇬🇧 HotUKDeals UK
     - 🇬🇧 VoucherCodes UK
     - 🇺🇸 RetailMeNot US
     - 🇺🇸 SimplyCodes US
-    
+    - 🇺🇸 CouponFollow US
+
     ⏱️ Durée estimée: 1h - 1h30
     """
     global scraper_status
@@ -556,8 +585,9 @@ def scrape_group2():
         ("UK/VoucherCodes", "UK.scrap_vouchercodes_UK", "main"),
         ("US/RetailMeNot", "US.scrap_retailmenot_US", "main"),
         ("US/SimplyCodes", "US.scrap_simplycodes_US", "main"),
+        ("US/CouponFollow", "US.scrap_couponfollow_US", "main"),
     ]
-    
+
     scraper_status["running"] = True
     scraper_status["last_source"] = "GROUP2 (UK+US)"
     scraper_status["last_run"] = datetime.now().isoformat()
@@ -594,13 +624,13 @@ def scrape_group2():
 def scrape_group3():
     """
     📦 Groupe 3: DE + FR (4 scrapers)
-    
+
     - 🇩🇪 MyDealz DE
     - 🇩🇪 Sparwelt DE
     - 🇫🇷 iGraal FR
     - 🇫🇷 Ma-Reduc FR
-    
-    ⏱️ Durée estimée: 1h - 1h30
+
+    ⏱️ Durée estimée: 30-50 minutes
     """
     global scraper_status
     
@@ -653,44 +683,44 @@ def scrape_group3():
 def scrape_group4():
     """
     📦 Groupe 4: ES (2 scrapers)
-    
+
     - 🇪🇸 Chollometro ES
     - 🇪🇸 Cuponation ES
-    
+
     ⏱️ Durée estimée: 30-45 minutes
     """
     global scraper_status
-    
+
     if scraper_status["running"]:
         raise HTTPException(status_code=409, detail="Un scraper est déjà en cours d'exécution")
-    
+
     results = []
     errors = []
-    
+
     scrapers = [
         ("ES/Chollometro", "ES.scrap_chollometro_ES", "main"),
         ("ES/Cuponation", "ES.scrap_cuponation_ES", "main"),
     ]
-    
+
     scraper_status["running"] = True
     scraper_status["last_source"] = "GROUP4 (ES)"
     scraper_status["last_run"] = datetime.now().isoformat()
-    
+
     try:
         for name, module, func in scrapers:
             try:
                 print(f"\n{'='*60}")
                 print(f"🚀 [GROUP4] Lancement de {name}...")
                 print(f"{'='*60}")
-                
+
                 mod = __import__(module, fromlist=[func])
                 getattr(mod, func)()
                 results.append(f"✅ {name}")
             except Exception as e:
                 errors.append(f"❌ {name}: {str(e)[:50]}")
-        
+
         scraper_status["last_result"] = f"GROUP4: ✅ {len(results)} succès, {len(errors)} erreurs"
-        
+
         return {
             "status": "completed",
             "group": "GROUP4 (ES)",
@@ -699,7 +729,120 @@ def scrape_group4():
             "total_success": len(results),
             "total_errors": len(errors)
         }
-    
+
+    finally:
+        scraper_status["running"] = False
+
+
+@app.post("/scrape/group5", tags=["📦 Groupes"])
+def scrape_group5():
+    """
+    📦 Groupe 5: PL (2 scrapers)
+
+    - 🇵🇱 Pepper PL
+    - 🇵🇱 Rabatio PL
+
+    ⏱️ Durée estimée: 30-45 minutes
+    """
+    global scraper_status
+
+    if scraper_status["running"]:
+        raise HTTPException(status_code=409, detail="Un scraper est déjà en cours d'exécution")
+
+    results = []
+    errors = []
+
+    scrapers = [
+        ("PL/Pepper", "PL.scrap_pepper_PL", "main"),
+        ("PL/Rabatio", "PL.scrap_rabatio_PL", "main"),
+    ]
+
+    scraper_status["running"] = True
+    scraper_status["last_source"] = "GROUP5 (PL)"
+    scraper_status["last_run"] = datetime.now().isoformat()
+
+    try:
+        for name, module, func in scrapers:
+            try:
+                print(f"\n{'='*60}")
+                print(f"🚀 [GROUP5] Lancement de {name}...")
+                print(f"{'='*60}")
+
+                mod = __import__(module, fromlist=[func])
+                getattr(mod, func)()
+                results.append(f"✅ {name}")
+            except Exception as e:
+                errors.append(f"❌ {name}: {str(e)[:50]}")
+
+        scraper_status["last_result"] = f"GROUP5: ✅ {len(results)} succès, {len(errors)} erreurs"
+
+        return {
+            "status": "completed",
+            "group": "GROUP5 (PL)",
+            "success": results,
+            "errors": errors,
+            "total_success": len(results),
+            "total_errors": len(errors)
+        }
+
+    finally:
+        scraper_status["running"] = False
+
+
+# ===================================================================
+# POLOGNE
+# ===================================================================
+
+@app.post("/scrape/pl/pepper", tags=["🇵🇱 Pologne"])
+def scrape_pepper_pl():
+    """🇵🇱 Lance le scraper Pepper Pologne."""
+    global scraper_status
+
+    if scraper_status["running"]:
+        raise HTTPException(status_code=409, detail="Un scraper est déjà en cours d'exécution")
+
+    try:
+        scraper_status["running"] = True
+        scraper_status["last_source"] = "Pepper PL"
+        scraper_status["last_run"] = datetime.now().isoformat()
+
+        from PL.scrap_pepper_PL import main as scrape_pepper
+        scrape_pepper()
+
+        scraper_status["last_result"] = "✅ Succès"
+        return {"status": "success", "message": "Scraping Pepper PL terminé"}
+
+    except Exception as e:
+        scraper_status["last_result"] = f"❌ Erreur: {str(e)[:100]}"
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        scraper_status["running"] = False
+
+
+@app.post("/scrape/pl/rabatio", tags=["🇵🇱 Pologne"])
+def scrape_rabatio_pl():
+    """🇵🇱 Lance le scraper Rabatio Pologne."""
+    global scraper_status
+
+    if scraper_status["running"]:
+        raise HTTPException(status_code=409, detail="Un scraper est déjà en cours d'exécution")
+
+    try:
+        scraper_status["running"] = True
+        scraper_status["last_source"] = "Rabatio PL"
+        scraper_status["last_run"] = datetime.now().isoformat()
+
+        from PL.scrap_rabatio_PL import main as scrape_rabatio
+        scrape_rabatio()
+
+        scraper_status["last_result"] = "✅ Succès"
+        return {"status": "success", "message": "Scraping Rabatio PL terminé"}
+
+    except Exception as e:
+        scraper_status["last_result"] = f"❌ Erreur: {str(e)[:100]}"
+        raise HTTPException(status_code=500, detail=str(e))
+
     finally:
         scraper_status["running"] = False
 
@@ -711,23 +854,24 @@ def scrape_group4():
 @app.post("/scrape/all", tags=["🌍 Tous"])
 def scrape_all():
     """
-    🌍 Lance TOUS les scrapers (14 au total).
-    
+    🌍 Lance TOUS les scrapers (17 au total).
+
     ⚠️ Attention: Cela peut prendre plusieurs minutes!
     """
     global scraper_status
-    
+
     if scraper_status["running"]:
         raise HTTPException(status_code=409, detail="Un scraper est déjà en cours d'exécution")
-    
+
     results = []
     errors = []
-    
+
     scrapers = [
         ("AU/Lifehacker", "AU.scrap_lifehacker_AU", "main"),
         ("AU/Cuponation", "AU.scrap_cuponation_AU", "main"),
         ("US/RetailMeNot", "US.scrap_retailmenot_US", "main"),
         ("US/SimplyCodes", "US.scrap_simplycodes_US", "main"),
+        ("US/CouponFollow", "US.scrap_couponfollow_US", "main"),
         ("UK/HotUKDeals", "UK.scrap_hotukdeals_UK", "main"),
         ("UK/VoucherCodes", "UK.scrap_vouchercodes_UK", "main"),
         ("DE/MyDealz", "DE.scrap_mydealz_DE", "main"),
@@ -738,6 +882,8 @@ def scrape_all():
         ("ES/Cuponation", "ES.scrap_cuponation_ES", "main"),
         ("IT/Codicescontonet", "IT.scrap_codicescontonet_IT", "main"),
         ("IT/Cuponation", "IT.scrap_cuponation_IT", "main"),
+        ("PL/Pepper", "PL.scrap_pepper_PL", "main"),
+        ("PL/Rabatio", "PL.scrap_rabatio_PL", "main"),
     ]
     
     scraper_status["running"] = True
@@ -767,6 +913,67 @@ def scrape_all():
             "total_errors": len(errors)
         }
     
+    finally:
+        scraper_status["running"] = False
+
+
+# ===================================================================
+# MATCHER + ANALYZER (post-scraping)
+# ===================================================================
+
+@app.post("/scrape/matcher", tags=["🔧 Post-traitement"])
+def run_matcher_and_analyzer(manual_date: str = None):
+    """
+    🔧 Lance le Code Matcher + Code Analyzer (réécriture des titres).
+
+    1. Code Matcher: compare les codes scrapés avec BigQuery, normalise les dates, crée le spreadsheet
+    2. Code Analyzer: réécrit les titres avec GPT-4o-mini dans le spreadsheet créé
+
+    Args:
+        manual_date: Date manuelle au format YYYY-MM-DD (optionnel, défaut: aujourd'hui)
+    """
+    global scraper_status
+
+    if scraper_status["running"]:
+        raise HTTPException(status_code=409, detail="Un scraper est déjà en cours d'exécution")
+
+    try:
+        scraper_status["running"] = True
+        scraper_status["last_source"] = "Matcher + Analyzer"
+        scraper_status["last_run"] = datetime.now().isoformat()
+
+        # Étape 1: Code Matcher
+        print(f"\n{'='*60}")
+        print(f"🔧 ÉTAPE 1: CODE MATCHER")
+        print(f"{'='*60}")
+
+        from code_matcher import main as run_matcher
+        spreadsheet_url = run_matcher(manual_date=manual_date)
+
+        if not spreadsheet_url:
+            scraper_status["last_result"] = "⚠️ Matcher: aucun nouveau code"
+            return {"status": "completed", "matcher": "no new codes", "analyzer": "skipped"}
+
+        # Étape 2: Code Analyzer (réécriture des titres)
+        print(f"\n{'='*60}")
+        print(f"🤖 ÉTAPE 2: CODE ANALYZER (réécriture des titres)")
+        print(f"{'='*60}")
+
+        from code_analyzer import main as run_analyzer
+        run_analyzer(batch_size=100)
+
+        scraper_status["last_result"] = f"✅ Matcher + Analyzer terminés"
+        return {
+            "status": "completed",
+            "matcher": "success",
+            "analyzer": "success",
+            "spreadsheet_url": spreadsheet_url
+        }
+
+    except Exception as e:
+        scraper_status["last_result"] = f"❌ Erreur: {str(e)[:100]}"
+        raise HTTPException(status_code=500, detail=str(e))
+
     finally:
         scraper_status["running"] = False
 

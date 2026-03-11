@@ -235,9 +235,9 @@ def main():
                         "Competitor_Source": "retailmenot",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Expiration_Date": code_info["expiration_date"],
                         "Title": code_info["title"],
-                        "Terms": code_info["terms"]
+                        "terms": code_info.get("terms", ""),
+                        "expiration_date": code_info.get("expiration_date", "")
                     })
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")

@@ -103,7 +103,7 @@ def scrape_mareduc_all(page, context, url):
                 var results = [];
                 // Sélectionner uniquement les offres NON expirées (sans classe -disabled)
                 var offers = document.querySelectorAll('div.m-offer[data-offer-type="code"]:not(.-disabled)');
-                
+
                 offers.forEach(function(offer) {
                     // EXCLURE les offres d'autres marchands (section similar-offers)
                     // Ces offres ont un lien .m-offer__footer vers une autre page marchand
@@ -112,32 +112,61 @@ def scrape_mareduc_all(page, context, url):
                         // Si le footer contient "Plus d'offres" c'est une offre d'un autre marchand
                         return;
                     }
-                    
+
                     // EXCLURE aussi les offres dans les conteneurs "similar-offers" ou "competitors"
                     var parent = offer.closest('[class*="similar"], [class*="competitor"], [data-redirections*="similar"]');
                     if (parent) {
                         return;
                     }
-                    
+
                     // Vérifier aussi via data-layer-push-on-click s'il s'agit d'un "competitor"
                     var dataLayer = offer.getAttribute('data-layer-push-on-click');
                     if (dataLayer && dataLayer.includes('competitor')) {
                         return;
                     }
-                    
+
                     // Le code est dans input.a-revealedCode__inputCode
                     var codeInput = offer.querySelector('input.a-revealedCode__inputCode');
                     var code = codeInput ? codeInput.value : null;
-                    
+
                     // Le titre est dans h2.m-offer__title
                     var titleH2 = offer.querySelector('h2.m-offer__title');
                     var title = titleH2 ? titleH2.textContent.trim() : null;
-                    
+
+                    // Terms: data-tooltip (base64 UTF-8) sur div.m-offer__tooltip
+                    var terms = '';
+                    var tooltipDiv = offer.querySelector('.m-offer__tooltip[data-tooltip]');
+                    if (tooltipDiv) {
+                        try {
+                            var b64 = tooltipDiv.getAttribute('data-tooltip');
+                            // Décoder base64 -> UTF-8 proprement
+                            var binStr = atob(b64);
+                            var bytes = new Uint8Array(binStr.length);
+                            for (var i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+                            var decoded = new TextDecoder('utf-8').decode(bytes);
+                            // Retirer les tags HTML pour avoir du texte brut
+                            var tmp = document.createElement('div');
+                            tmp.innerHTML = decoded;
+                            terms = tmp.textContent.trim().replace(/\\s+/g, ' ');
+                        } catch(e) {}
+                    }
+
+                    // Expiration: dans div.m-offer__details p ("Expire le DD/MM/YYYY" ou "Validité permanente")
+                    var expiry = '';
+                    var detailsP = offer.querySelector('.m-offer__details p');
+                    if (detailsP) {
+                        var pText = detailsP.textContent.trim();
+                        var match = pText.match(/Expire le (\\d{2}\\/\\d{2}\\/\\d{4})/);
+                        if (match) {
+                            expiry = match[1];
+                        }
+                    }
+
                     if (code && title && code.length >= 3) {
-                        results.push({code: code, title: title});
+                        results.push({code: code, title: title, terms: terms, expiration_date: expiry});
                     }
                 });
-                
+
                 return results;
             }
         """)
@@ -148,17 +177,19 @@ def scrape_mareduc_all(page, context, url):
         for item in codes_data:
             code = item['code']
             title = item['title']
-            
+
             # Vérifier uniquement si le code est un doublon
             if code in processed_codes:
                 continue
-            
+
             # N'ajouter que si code ET titre sont présents
             if code and title:
                 processed_codes.add(code)
                 results.append({
                     "code": code,
-                    "title": title
+                    "title": title,
+                    "terms": item.get("terms", ""),
+                    "expiration_date": item.get("expiration_date", "")
                 })
         
         # Fermer le nouvel onglet si on en a ouvert un
@@ -214,7 +245,9 @@ def main():
                         "Competitor_Source": "mareduc",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Title": code_info["title"]
+                        "Title": code_info["title"],
+                        "terms": code_info.get("terms", ""),
+                        "expiration_date": code_info.get("expiration_date", "")
                     })
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")

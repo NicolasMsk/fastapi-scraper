@@ -40,6 +40,35 @@ def scrape_codicescontonet_all(page, context, url):
         except:
             pass
         
+        # === PRE-EXTRACT expiry from listing page ===
+        # Expiry: span containing "Valido fino al" next to expried time icon
+        # Title: div.hidden_3 (matches popup title)
+        title_to_expiry = {}
+        title_expiry_data = page.evaluate("""() => {
+            var pairs = [];
+            var cards = document.querySelectorAll('div.codice-scontonet_MYUVPJ');
+            cards.forEach(function(card) {
+                var titleEl = card.querySelector('div.hidden_3');
+                var title = titleEl ? titleEl.textContent.trim() : '';
+                if (!title) return;
+                var expiry = '';
+                var spans = card.querySelectorAll('span.codice-scontonet__19GKeD');
+                spans.forEach(function(span) {
+                    var txt = span.textContent.trim();
+                    if (txt.match(/Valido fino al/i)) {
+                        expiry = txt.replace(/^Valido fino al\\s*/i, '').trim();
+                    }
+                });
+                pairs.push([title, expiry]);
+            });
+            return pairs;
+        }""")
+        for pair in title_expiry_data:
+            if pair[0]:
+                title_to_expiry[pair[0]] = pair[1]
+        if title_to_expiry:
+            print(f"[CodiceSconto] {len(title_to_expiry)} expiry dates pre-extracted")
+
         # Trouver les boutons "Vedi il codice" (liens avec classe _code_btn)
         see_code_buttons = page.locator("a._code_btn")
         total_count = see_code_buttons.count()
@@ -178,9 +207,11 @@ def scrape_codicescontonet_all(page, context, url):
             if code and current_title and code not in processed_codes and current_title not in processed_titles:
                 processed_codes.add(code)
                 processed_titles.add(current_title)
+                expiration_date = title_to_expiry.get(current_title, "")
                 results.append({
                     "code": code,
-                    "title": current_title
+                    "title": current_title,
+                    "expiration_date": expiration_date
                 })
                 print(f"[CodiceSconto] ✅ Code: {code} -> {current_title[:40]}...")
             else:
@@ -308,7 +339,8 @@ def main():
                             "Competitor_Source": "codice-sconto.net",
                             "Competitor_URL": url,
                             "Code": code_info.get("code", ""),
-                            "Title": code_info.get("title", "")
+                            "Title": code_info.get("title", ""),
+                            "expiration_date": code_info.get("expiration_date", "")
                         })
                     break  # Succès, sortir de la boucle retry
                     

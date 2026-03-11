@@ -24,7 +24,7 @@ load_dotenv()
 SPREADSHEET_NAME_FORMAT = "Missing_Deals_Coupons_{date}"  # {date} sera remplacé par MM_DD_YYYY
 
 # Liste des sheets pays à traiter (US exclu)
-COUNTRY_SHEETS = ["UK", "AU", "DE", "ES", "FR", "IT"]
+COUNTRY_SHEETS = ["UK", "AU", "DE", "ES", "FR", "IT", "PL"]
 
 # Chemin des credentials Google Sheets
 _local_path = os.path.join(os.path.dirname(__file__), "..", "credentials", "service_account.json")
@@ -48,14 +48,17 @@ REWRITE_RULES = """
 
 **🚫 NEVER DO:**
 - Never include the merchant/brand name in the rewritten title
-- Never just rephrase with similar words - create something genuinely different
+- Never just rephrase with similar words - create something genuinely different, applying the correct grammar, syntax rules and the organic feel of the target language.
 - Never exceed 100 characters
+- Never hallucinate - if you're missing any offer details do not try to include them in the rewritten title, unless the code suggests any discount value.
+- Never include the promo code in the rewritten title.
 
 **✅ ALWAYS DO:**
-- Front-load the value: Put the discount/offer at the beginning
-- Be specific: Include exact amounts, percentages, or product categories
-- Use Title Case: Capitalize major words
+- Front-load the value: Put the discount/offer at the beginning if available
+- Be specific: Include exact amounts, percentages, or product categories if available
+- Use Title Case: Capitalize major words (unless the offer is in German - in this case apply the German grammar rules (capitalized nouns))
 - Make it scannable: Value should be instantly clear in 2-3 seconds
+- Make the title clear, but enticing.
 
 **REWRITING APPROACH** - Choose the best fit:
 1. Action-Oriented: Create urgency with powerful verbs
@@ -205,7 +208,8 @@ def analyze_batch_with_llm(records: list, client: OpenAI, country: str) -> list:
         "DE": "German",
         "ES": "Spanish",
         "FR": "French",
-        "IT": "Italian"
+        "IT": "Italian",
+        "PL": "Polish"
     }
     language = COUNTRY_LANGUAGES.get(country, "English")
 

@@ -44,9 +44,9 @@ def scrape_sparwelt_all(page, context, url):
         
         if total_count == 0:
             return results
-        
+
         processed_codes = set()
-        
+
         # === ÉTAPE 1: Cliquer sur le premier bouton → ouvre nouvel onglet ===
         first_btn = see_code_buttons.first
         first_btn.scroll_into_view_if_needed()
@@ -92,12 +92,41 @@ def scrape_sparwelt_all(page, context, url):
             if current_title is None:
                 current_title = f"Offre {iteration + 1}"
             
+            # 2b. Extraire terms + expiry depuis le <dl> de la popup
+            terms = ""
+            expiration_date = ""
+            try:
+                dl_data = work_page.evaluate("""() => {
+                    var dl = document.querySelector('dl');
+                    if (!dl) return {terms: '', expiry: ''};
+                    var expiry = '';
+                    var parts = [];
+                    var dts = dl.querySelectorAll('dt');
+                    dts.forEach(function(dt) {
+                        var dd = dt.nextElementSibling;
+                        if (!dd) return;
+                        var label = dt.textContent.trim();
+                        var value = dd.textContent.trim();
+                        if (label.match(/Gültig bis/)) {
+                            expiry = value;
+                        }
+                        parts.push(label + ' ' + value);
+                    });
+                    return {terms: parts.join(' | '), expiry: expiry};
+                }""")
+                terms = dl_data.get("terms", "")
+                expiration_date = dl_data.get("expiry", "")
+            except:
+                pass
+
             # Ajouter si code valide et non dupliqué
             if code and code not in processed_codes:
                 processed_codes.add(code)
                 results.append({
                     "code": code,
-                    "title": current_title
+                    "title": current_title,
+                    "terms": terms,
+                    "expiration_date": expiration_date
                 })
             
             # 3. Fermer la popup avec le X
@@ -201,12 +230,14 @@ def main():
                         "Competitor_Source": "sparwelt",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Title": code_info["title"]
+                        "Title": code_info["title"],
+                        "terms": code_info.get("terms", ""),
+                        "expiration_date": code_info.get("expiration_date", "")
                     })
-                
+
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")
-            
+
             # Fermer les onglets popup éventuels (garder la page principale)
             while len(context.pages) > 1:
                 context.pages[-1].close()

@@ -8,6 +8,7 @@ Script Playwright pour scraper TOUS les codes Rabatio (Pologne)
 """
 
 import os
+import re
 import sys
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
@@ -16,6 +17,11 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gsheet_loader import get_competitor_urls, load_competitors_data
 from gsheet_writer import append_to_gsheet
+
+# Exclusive codes sheet
+EXCLUSIVE_SPREADSHEET_ID = "1YZQ9YPYmBuUZSIQgSVdjxmweNDAk0LK74PU5O4EAX2A"
+EXCLUSIVE_SHEET_NAME = "Exclusive_Code"
+EXCLUSIVE_PATTERN = re.compile(r'tylko u nas', re.IGNORECASE)
 
 
 def scrape_rabatio_all(page, context, url):
@@ -44,6 +50,38 @@ def scrape_rabatio_all(page, context, url):
             print("[Rabatio] Cookie fermé")
         except:
             pass
+
+        # === PRE-EXTRACT terms + expiry from listing page ===
+        # Title is in data-offer-title on the <a> button
+        # Expiry is in span.rabat__list-item--time (sibling of <a> in --button div)
+        # Terms is in span.subtitle (in the --detail div, same parent container)
+        title_extras = page.evaluate("""() => {
+            var mapping = {};
+            var buttons = document.querySelectorAll("a.js-get-coupon[data-action-type='show_code']");
+            buttons.forEach(function(btn) {
+                var title = btn.getAttribute('data-offer-title') || '';
+                if (!title) return;
+                var expiry = '';
+                var terms = '';
+                var buttonDiv = btn.closest('.rabat__list-item--button');
+                if (buttonDiv) {
+                    var timeEl = buttonDiv.querySelector('span.rabat__list-item--time');
+                    if (timeEl) {
+                        var match = timeEl.textContent.trim().match(/ważny do (\\d{2}\\.\\d{2}\\.\\d{4})/i);
+                        if (match) expiry = match[1];
+                    }
+                }
+                var container = btn.closest('.rabat__list-item') || (buttonDiv ? buttonDiv.parentElement : null);
+                if (container) {
+                    var subtitle = container.querySelector('span.subtitle');
+                    if (subtitle) terms = subtitle.textContent.trim();
+                }
+                mapping[title] = {terms: terms, expiration_date: expiry};
+            });
+            return mapping;
+        }""")
+        if title_extras:
+            print(f"[Rabatio] {len(title_extras)} terms/expiry pre-extracted")
 
         # Trouver les boutons code sur la page principale
         code_buttons = page.locator("xpath=//div[contains(@class, 'rabat__list-item--button') and not(.//span[contains(text(), 'wygasł')])]//a[contains(@class, 'js-get-coupon') and @data-action-type='show_code']")
@@ -102,7 +140,13 @@ def scrape_rabatio_all(page, context, url):
                 if code and title and code not in processed_codes and title not in processed_titles:
                     processed_codes.add(code)
                     processed_titles.add(title)
-                    results.append({"code": code, "title": title})
+                    extras = title_extras.get(title, {})
+                    results.append({
+                        "code": code,
+                        "title": title,
+                        "terms": extras.get("terms", ""),
+                        "expiration_date": extras.get("expiration_date", "")
+                    })
                     print(f"[Rabatio] ✅ Code: {code} | {title[:50]}...")
                 elif code and code in processed_codes:
                     print(f"[Rabatio] ⚠️ Code doublon: {code}")
@@ -158,6 +202,50 @@ def scrape_rabatio_all(page, context, url):
     return results
 
 
+def append_exclusive_to_gsheet(results):
+    """Append exclusive codes to the dedicated Exclusive_Code spreadsheet."""
+    if not results:
+        return 0
+
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    _local_path = os.path.join(os.path.dirname(__file__), "..", "..", "credentials", "service_account.json")
+    _cloud_path = "/app/credentials/service_account.json"
+    creds_path = _cloud_path if os.path.exists(_cloud_path) else _local_path
+
+    creds = Credentials.from_service_account_file(creds_path, scopes=[
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ])
+    gc = gspread.authorize(creds)
+
+    spreadsheet = gc.open_by_key(EXCLUSIVE_SPREADSHEET_ID)
+    worksheet = spreadsheet.worksheet(EXCLUSIVE_SHEET_NAME)
+
+    rows_to_add = []
+    for r in results:
+        rows_to_add.append([
+            r.get("Date", ""),
+            r.get("Country", ""),
+            r.get("Merchant_ID", ""),
+            r.get("Merchant_slug", ""),
+            r.get("GPN_URL", ""),
+            r.get("Competitor_Source", ""),
+            r.get("Competitor_URL", ""),
+            r.get("Code", ""),
+            r.get("Title", ""),
+            r.get("Terms", r.get("terms", "")),
+            r.get("Expiry Date", r.get("expiration_date", "")),
+            "",  # Actioned by
+            ""   # Comments
+        ])
+
+    worksheet.append_rows(rows_to_add, value_input_option="USER_ENTERED")
+    print(f"📤 {len(rows_to_add)} exclusive codes written to Exclusive_Code sheet")
+    return len(rows_to_add)
+
+
 def main():
     """Scrape Rabatio PL depuis Google Sheets"""
     print(f"📖 Chargement depuis Google Sheets...")
@@ -167,6 +255,7 @@ def main():
     print(f"📍 Rabatio: {len(competitor_data)} URLs uniques")
 
     all_results = []
+    all_exclusive = []
 
     print(f"\n🚀 Lancement de Playwright...")
 
@@ -189,7 +278,7 @@ def main():
                 print(f"   ✅ {len(codes)} codes trouvés")
 
                 for code_info in codes:
-                    all_results.append({
+                    row = {
                         "Date": datetime.now().strftime("%Y-%m-%d"),
                         "Country": "PL",
                         "Merchant_ID": merchant_row.get("Merchant_ID", ""),
@@ -198,17 +287,24 @@ def main():
                         "Competitor_Source": "rabatio",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Title": code_info["title"]
-                    })
+                        "Title": code_info["title"],
+                        "terms": code_info.get("terms", ""),
+                        "expiration_date": code_info.get("expiration_date", "")
+                    }
+                    # Check if title contains "Tylko u nas" → exclusive
+                    if EXCLUSIVE_PATTERN.search(code_info.get("title", "")):
+                        all_exclusive.append(row)
+                        print(f"   🔒 Exclusive: {code_info['code']}")
+                    else:
+                        all_results.append(row)
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")
 
-            print(f"   📝 Total: {len(all_results)} codes")
+            print(f"   📝 Total: {len(all_results)} codes + {len(all_exclusive)} exclusive")
 
         browser.close()
 
     if all_results:
-        # Écriture directe dans Google Sheets
         append_to_gsheet(all_results, source_name="Rabatio PL")
 
         print(f"\n{'='*60}")
@@ -217,6 +313,12 @@ def main():
         print(f"{'='*60}")
     else:
         print(f"\n⚠️ Aucun code trouvé")
+
+    if all_exclusive:
+        append_exclusive_to_gsheet(all_exclusive)
+        print(f"🔒 {len(all_exclusive)} exclusive codes sent to Exclusive_Code sheet")
+    else:
+        print(f"⚠️ No exclusive codes found")
 
 
 if __name__ == "__main__":

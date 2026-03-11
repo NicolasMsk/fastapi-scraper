@@ -294,10 +294,12 @@ def main():
                             "Competitor_Source": "chollometro",
                             "Competitor_URL": url,
                             "Code": code_info.get("code", ""),
-                            "Title": code_info.get("title", "")
+                            "Title": code_info.get("title", ""),
+                            "terms": code_info.get("terms", ""),
+                            "expiration_date": code_info.get("expiration_date", "")
                         })
                     break
-                    
+
                 except Exception as e:
                     error_msg = str(e)
                     if "Page crashed" in error_msg or "Target closed" in error_msg:

@@ -73,9 +73,34 @@ def scrape_cuponation_it_all(page, context, url):
             print("[CuponationIT] Aucun code disponible sur cette page")
             return results
         
+        # Pré-extraire un mapping titre → expiration_date depuis la page listing
+        title_to_expiry = {}
+        title_expiry_data = page.evaluate("""() => {
+            const cards = document.querySelectorAll("div[data-testid='vouchers-ui-voucher-card']");
+            const pairs = [];
+            cards.forEach(card => {
+                const h3 = card.querySelector("h3");
+                const title = h3 ? h3.textContent.trim() : '';
+                let expiry = '';
+                card.querySelectorAll("span").forEach(span => {
+                    const txt = span.textContent.trim();
+                    if (txt.match(/Scadenza\\s+\\d/)) {
+                        expiry = txt.replace(/^Scadenza\\s*/, '').trim();
+                    }
+                });
+                if (title) pairs.push([title, expiry]);
+            });
+            return pairs;
+        }""")
+        for pair in title_expiry_data:
+            if pair[0]:
+                title_to_expiry[pair[0]] = pair[1]
+        if title_to_expiry:
+            print(f"[CuponationIT] {len(title_to_expiry)} dates d'expiration pré-extraites")
+
         processed_codes = set()
         processed_titles = set()
-        
+
         # Cliquer sur le premier bouton pour ouvrir le nouvel onglet
         first_btn = get_code_buttons.first
         first_btn.scroll_into_view_if_needed()
@@ -152,15 +177,21 @@ def scrape_cuponation_it_all(page, context, url):
             except:
                 pass
             
+            # Récupérer l'expiration_date pré-extraite (lookup par titre)
+            expiration_date = title_to_expiry.get(current_title, "") if current_title else ""
+
             # N'ajouter que si code ET titre sont trouvés (pas de valeur par défaut)
             if code and current_title and len(code) >= 3 and code not in processed_codes and current_title not in processed_titles:
                 processed_codes.add(code)
                 processed_titles.add(current_title)
                 results.append({
                     "code": code,
-                    "title": current_title
+                    "title": current_title,
+                    "expiration_date": expiration_date
                 })
                 print(f"[CuponationIT] ✅ Code: {code} -> {current_title[:40]}...")
+                if expiration_date:
+                    print(f"[CuponationIT]    📅 Expiry: {expiration_date}")
             else:
                 print(f"[CuponationIT] ⚠️ Code ou titre non trouvé, ou doublon")
             
@@ -285,13 +316,15 @@ def main():
                         "Competitor_Source": "cuponation_it",
                         "Competitor_URL": url,
                         "Code": code_info.get("code", ""),
-                        "Title": code_info.get("title", "")
+                        "Title": code_info.get("title", ""),
+                        "terms": code_info.get("terms", ""),
+                        "expiration_date": code_info.get("expiration_date", "")
                     })
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")
-            
+
             print(f"   📝 Total: {len(all_results)} codes")
-        
+
         browser.close()
     
     if all_results:

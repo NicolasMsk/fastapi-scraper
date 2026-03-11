@@ -86,19 +86,29 @@ def scrape_lifehacker_all(page, url):
                 
                 # Le titre est dans l'attribut data-promotion-title du bouton
                 title = button.get_attribute("data-promotion-title")
-                # Ne pas mettre de valeur par défaut si titre non trouvé
-                
+
+                # Extraire les terms depuis la carte parente
+                terms = ""
+                try:
+                    card = button.locator("xpath=ancestor::div[contains(@class, 'promotion-discount-card')]").first
+                    terms_elem = card.locator("div.promotion-term-extra-tab__detail-content").first
+                    if terms_elem.count() > 0:
+                        terms = terms_elem.inner_text().strip()
+                except:
+                    pass
+
                 # N'ajouter que si code ET titre sont trouvés (pas de valeur par défaut)
                 if code and title and len(code) >= 3 and code not in processed_codes and title not in processed_titles:
                     processed_codes.add(code)
                     processed_titles.add(title)
                     results.append({
-                        "success": True,
                         "code": code,
                         "title": title,
-                        "message": "Code extrait avec succès"
+                        "terms": terms
                     })
                     print(f"[Lifehacker] ✅ Code: {code} -> {title[:50]}...")
+                    if terms:
+                        print(f"[Lifehacker]    📋 Terms: {terms[:60]}...")
                 elif code and not title:
                     print(f"[Lifehacker] ⚠️ Titre non trouvé pour le code: {code}")
                 elif code:
@@ -157,13 +167,15 @@ def main():
                         "Competitor_Source": "lifehacker",
                         "Competitor_URL": url,
                         "Code": code_info.get("code", ""),
-                        "Title": code_info.get("title", "")
+                        "Title": code_info.get("title", ""),
+                        "terms": code_info.get("terms", ""),
+                        "expiration_date": code_info.get("expiration_date", "")
                     })
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")
-            
+
             print(f"   📝 Total: {len(all_results)} codes")
-        
+
         browser.close()
     
     if all_results:

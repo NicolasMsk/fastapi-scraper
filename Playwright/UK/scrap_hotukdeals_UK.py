@@ -273,8 +273,8 @@ def main():
                         "Competitor_Source": "hotukdeals",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Expiration_Date": code_info["expiration_date"],
-                        "Title": code_info["title"]
+                        "Title": code_info["title"],
+                        "expiration_date": code_info.get("expiration_date", "")
                     })
             except Exception as e:
                 print(f"   ❌ Error: {str(e)[:50]}")

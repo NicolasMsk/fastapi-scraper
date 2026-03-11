@@ -16,7 +16,7 @@ from gsheet_loader import get_competitor_urls, load_competitors_data
 from gsheet_writer import append_to_gsheet
 
 
-def scrape_pepper_all(page, context, url):
+def scrape_pepper_all(page, context, url, exclusive_only=False):
     """
     Scrape all codes from a Pepper.pl page using Playwright.
 
@@ -24,6 +24,8 @@ def scrape_pepper_all(page, context, url):
     - div._1hla7140 = "Active vouchers for retailers similar to..."
     - div.jkau50 = "Great discounts that have expired..."
 
+    Args:
+        exclusive_only: If True, scrape ONLY exclusive codes (reversed filter)
     We only keep codes from the main merchant (with h3 = not expired)
     """
     results = []
@@ -40,20 +42,56 @@ def scrape_pepper_all(page, context, url):
         except:
             pass
 
+        # === PRE-EXTRACT expiry dates from listing page ===
+        title_to_expiry = {}
+        title_expiry_data = page.evaluate("""() => {
+            const cards = document.querySelectorAll("div[data-testid='vouchers-ui-voucher-card']");
+            const pairs = [];
+            cards.forEach(card => {
+                const h3 = card.querySelector("h3");
+                const title = h3 ? h3.textContent.trim() : '';
+                let expiry = '';
+                card.querySelectorAll("span").forEach(span => {
+                    const txt = span.textContent.trim();
+                    if (txt.match(/Ważny do/)) {
+                        expiry = txt.replace(/^Ważny do\s*/, '').trim();
+                    }
+                });
+                if (title) pairs.push([title, expiry]);
+            });
+            return pairs;
+        }""")
+        for pair in title_expiry_data:
+            if pair[0]:
+                title_to_expiry[pair[0]] = pair[1]
+        if title_to_expiry:
+            print(f"[Pepper] {len(title_to_expiry)} expiry dates pre-extracted")
+
         # ===================================================================
         # XPath to find VALID "See Code" buttons:
         # 1. Inside a card with h3 (not expired)
         # 2. NOT in the "similar vouchers" container (_1hla7140)
         # 3. NOT in the "expired" container (jkau50 with h2 containing "expired")
-        # 4. NOT "Exclusive" offers
+        # 4. Exclusive filter depends on mode
         # ===================================================================
-        xpath_valid_codes = """
-            //div[@data-testid='vouchers-ui-voucher-card-description'][.//h3]
-                [not(ancestor::div[contains(@class, '_1hla7140')])]
-                [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired') or contains(text(), 'wygasł')]])]
-                [not(ancestor::div[@data-testid='vouchers-ui-voucher-card']//div[contains(text(), 'Exclusive')])]
-            //div[@role='button' and (contains(@title, 'See Code') or contains(@title, 'Zobacz kod') or contains(@title, 'Pokaż kod'))]
-        """.replace('\n', '').replace('    ', '')
+        if exclusive_only:
+            # ONLY exclusive codes
+            xpath_valid_codes = """
+                //div[@data-testid='vouchers-ui-voucher-card-description'][.//h3]
+                    [not(ancestor::div[contains(@class, '_1hla7140')])]
+                    [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired') or contains(text(), 'wygasł')]])]
+                    [ancestor::div[@data-testid='vouchers-ui-voucher-card']//div[contains(text(), 'Exclusive') or contains(text(), 'Tylko u nas')]]
+                //div[@role='button' and (contains(@title, 'See Code') or contains(@title, 'Zobacz kod') or contains(@title, 'Pokaż kod'))]
+            """.replace('\n', '').replace('    ', '')
+        else:
+            # Normal mode: exclude exclusive
+            xpath_valid_codes = """
+                //div[@data-testid='vouchers-ui-voucher-card-description'][.//h3]
+                    [not(ancestor::div[contains(@class, '_1hla7140')])]
+                    [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired') or contains(text(), 'wygasł')]])]
+                    [not(ancestor::div[@data-testid='vouchers-ui-voucher-card']//div[contains(text(), 'Exclusive') or contains(text(), 'Tylko u nas')])]
+                //div[@role='button' and (contains(@title, 'See Code') or contains(@title, 'Zobacz kod') or contains(@title, 'Pokaż kod'))]
+            """.replace('\n', '').replace('    ', '')
 
         # Locate all valid "See Code" buttons
         see_code_buttons = page.locator(f"xpath={xpath_valid_codes}")
@@ -133,11 +171,30 @@ def scrape_pepper_all(page, context, url):
                     except:
                         pass
 
+                # STEP 2b: Extract terms from popup (click "Ogólne warunki handlowe")
+                terms = ""
+                try:
+                    terms_btn = new_page.locator("button.ekdzs0:has-text('warunki')").first
+                    if terms_btn.count() > 0:
+                        terms_btn.click(timeout=2000)
+                        new_page.wait_for_timeout(500)
+                        terms_elem = new_page.locator("div[data-testid='voucherPopup-collapsablePanel-root'] div[data-testid='rich-text-root']").first
+                        if terms_elem.count() > 0:
+                            terms = terms_elem.inner_text().strip()
+                except:
+                    pass
+
                 # Only add if both code AND title are found (no default values)
                 if code and current_title and code not in processed_codes and current_title not in processed_titles:
                     processed_codes.add(code)
                     processed_titles.add(current_title)
-                    results.append({"code": code, "title": current_title})
+                    expiration_date = title_to_expiry.get(current_title, "")
+                    results.append({
+                        "code": code,
+                        "title": current_title,
+                        "terms": terms,
+                        "expiration_date": expiration_date
+                    })
                     print(f"[Pepper] ✅ Code: {code} | {current_title[:50]}...")
 
                 # STEP 3: Close the popup
@@ -152,13 +209,22 @@ def scrape_pepper_all(page, context, url):
                 # STEP 4: Find next button (with same exclusions)
                 new_page.wait_for_timeout(300)
 
-                xpath_next = """
-                    //div[@data-testid='vouchers-ui-voucher-card-description'][.//h3]
-                        [not(ancestor::div[contains(@class, '_1hla7140')])]
-                        [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired') or contains(text(), 'wygasł')]])]
-                        [not(ancestor::div[@data-testid='vouchers-ui-voucher-card']//div[contains(text(), 'Exclusive')])]
-                    //div[@role='button' and (contains(@title, 'See Code') or contains(@title, 'Zobacz kod') or contains(@title, 'Pokaż kod'))]
-                """.replace('\n', '').replace('    ', '')
+                if exclusive_only:
+                    xpath_next = """
+                        //div[@data-testid='vouchers-ui-voucher-card-description'][.//h3]
+                            [not(ancestor::div[contains(@class, '_1hla7140')])]
+                            [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired') or contains(text(), 'wygasł')]])]
+                            [ancestor::div[@data-testid='vouchers-ui-voucher-card']//div[contains(text(), 'Exclusive') or contains(text(), 'Tylko u nas')]]
+                        //div[@role='button' and (contains(@title, 'See Code') or contains(@title, 'Zobacz kod') or contains(@title, 'Pokaż kod'))]
+                    """.replace('\n', '').replace('    ', '')
+                else:
+                    xpath_next = """
+                        //div[@data-testid='vouchers-ui-voucher-card-description'][.//h3]
+                            [not(ancestor::div[contains(@class, '_1hla7140')])]
+                            [not(ancestor::div[contains(@class, 'jkau50') and .//h2[contains(text(), 'expired') or contains(text(), 'wygasł')]])]
+                            [not(ancestor::div[@data-testid='vouchers-ui-voucher-card']//div[contains(text(), 'Exclusive') or contains(text(), 'Tylko u nas')])]
+                        //div[@role='button' and (contains(@title, 'See Code') or contains(@title, 'Zobacz kod') or contains(@title, 'Pokaż kod'))]
+                    """.replace('\n', '').replace('    ', '')
 
                 # Get all valid buttons
                 next_buttons = new_page.locator(f"xpath={xpath_next}")
@@ -196,6 +262,54 @@ def scrape_pepper_all(page, context, url):
     return results
 
 
+EXCLUSIVE_SPREADSHEET_ID = "1YZQ9YPYmBuUZSIQgSVdjxmweNDAk0LK74PU5O4EAX2A"
+EXCLUSIVE_SHEET_NAME = "Exclusive_Code"
+
+
+def append_exclusive_to_gsheet(results):
+    """Append exclusive codes to the dedicated Exclusive_Code spreadsheet."""
+    if not results:
+        return 0
+
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    _local_path = os.path.join(os.path.dirname(__file__), "..", "..", "credentials", "service_account.json")
+    _cloud_path = "/app/credentials/service_account.json"
+    creds_path = _cloud_path if os.path.exists(_cloud_path) else _local_path
+
+    creds = Credentials.from_service_account_file(creds_path, scopes=[
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ])
+    gc = gspread.authorize(creds)
+
+    spreadsheet = gc.open_by_key(EXCLUSIVE_SPREADSHEET_ID)
+    worksheet = spreadsheet.worksheet(EXCLUSIVE_SHEET_NAME)
+
+    rows_to_add = []
+    for r in results:
+        rows_to_add.append([
+            r.get("Date", ""),
+            r.get("Country", ""),
+            r.get("Merchant_ID", ""),
+            r.get("Merchant_slug", ""),
+            r.get("GPN_URL", ""),
+            r.get("Competitor_Source", ""),
+            r.get("Competitor_URL", ""),
+            r.get("Code", ""),
+            r.get("Title", ""),
+            r.get("Terms", r.get("terms", "")),
+            r.get("Expiry Date", r.get("expiration_date", "")),
+            "",  # Actioned by
+            ""   # Comments
+        ])
+
+    worksheet.append_rows(rows_to_add, value_input_option="USER_ENTERED")
+    print(f"📤 {len(rows_to_add)} exclusive codes written to Exclusive_Code sheet")
+    return len(rows_to_add)
+
+
 def main():
     """Scrape Pepper PL depuis Google Sheets"""
     print(f"📖 Chargement depuis Google Sheets...")
@@ -205,6 +319,7 @@ def main():
     print(f"📍 Pepper: {len(competitor_data)} URLs uniques")
 
     all_results = []
+    all_exclusive = []
 
     print(f"\n🚀 Launching Playwright...")
 
@@ -223,6 +338,7 @@ def main():
             print(f"   URL: {url[:60]}...")
 
             try:
+                # Normal codes (non-exclusive)
                 codes = scrape_pepper_all(page, context, url)
                 print(f"   ✅ {len(codes)} codes found")
 
@@ -236,17 +352,37 @@ def main():
                         "Competitor_Source": "pepper",
                         "Competitor_URL": url,
                         "Code": code_info["code"],
-                        "Title": code_info["title"]
+                        "Title": code_info["title"],
+                        "terms": code_info.get("terms", ""),
+                        "expiration_date": code_info.get("expiration_date", "")
                     })
+
+                # Exclusive codes (second pass)
+                exclusive_codes = scrape_pepper_all(page, context, url, exclusive_only=True)
+                if exclusive_codes:
+                    print(f"   🔒 {len(exclusive_codes)} exclusive codes found")
+                    for code_info in exclusive_codes:
+                        all_exclusive.append({
+                            "Date": datetime.now().strftime("%Y-%m-%d"),
+                            "Country": "PL",
+                            "Merchant_ID": merchant_row.get("Merchant_ID", ""),
+                            "Merchant_slug": merchant_slug,
+                            "GPN_URL": merchant_row.get("GPN_URL", ""),
+                            "Competitor_Source": "pepper",
+                            "Competitor_URL": url,
+                            "Code": code_info["code"],
+                            "Title": code_info["title"],
+                            "terms": code_info.get("terms", ""),
+                            "expiration_date": code_info.get("expiration_date", "")
+                        })
             except Exception as e:
                 print(f"   ❌ Error: {str(e)[:50]}")
 
-            print(f"   📝 Total: {len(all_results)} codes")
+            print(f"   📝 Total: {len(all_results)} codes + {len(all_exclusive)} exclusive")
 
         browser.close()
 
     if all_results:
-        # Écriture directe dans Google Sheets
         append_to_gsheet(all_results, source_name="Pepper PL")
 
         print(f"\n{'='*60}")
@@ -255,6 +391,12 @@ def main():
         print(f"{'='*60}")
     else:
         print(f"\n⚠️ No codes found")
+
+    if all_exclusive:
+        append_exclusive_to_gsheet(all_exclusive)
+        print(f"🔒 {len(all_exclusive)} exclusive codes sent to Exclusive_Code sheet")
+    else:
+        print(f"⚠️ No exclusive codes found")
 
 
 if __name__ == "__main__":

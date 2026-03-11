@@ -9,9 +9,10 @@ Compatible local et Google Cloud Run.
 """
 
 import os
+import re
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 from google.cloud import bigquery
 from googleapiclient.discovery import build
@@ -344,6 +345,129 @@ def match_codes(df_missing: pd.DataFrame, df_content: pd.DataFrame, df_teahupoo:
 
 
 # ============================================================================
+# NORMALISATION DES DATES D'EXPIRATION
+# ============================================================================
+
+def normalize_expiry_dates(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalise la colonne expiration_date au format DD/MM/YYYY.
+
+    Gère les formats:
+    - DD/MM/YYYY (déjà bon)
+    - D Mon YYYY / DD Mon YYYY (ex: 5 Jul 2026, 15 Mar 2026)
+    - D Mon / DD Mon (ex: 18 Mar, 1 Apr → ajoute l'année courante/suivante)
+    - today, tomorrow
+    - in X hours / in X hour
+
+    Args:
+        df: DataFrame avec colonne expiration_date
+
+    Returns:
+        DataFrame avec expiration_date normalisée
+    """
+    # Supporter les deux noms de colonne
+    col_name = None
+    if 'Expiry Date' in df.columns:
+        col_name = 'Expiry Date'
+    elif 'expiration_date' in df.columns:
+        col_name = 'expiration_date'
+    else:
+        return df
+
+    print(f"\n{'='*60}")
+    print(f"📅 NORMALISATION DES DATES D'EXPIRATION")
+    print(f"{'='*60}")
+
+    today = datetime.now()
+    normalized_count = 0
+    total = 0
+
+    def _parse_date(val):
+        nonlocal normalized_count, total
+        if not val or pd.isna(val):
+            return val
+
+        val = str(val).strip()
+        if not val:
+            return val
+
+        total += 1
+
+        # Déjà au format DD/MM/YYYY
+        m = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})$', val)
+        if m:
+            day, month, year = m.groups()
+            normalized_count += 1
+            return f"{int(day):02d}/{int(month):02d}/{year}"
+
+        # "today"
+        if val.lower() == 'today':
+            normalized_count += 1
+            return today.strftime("%d/%m/%Y")
+
+        # "tomorrow"
+        if val.lower() == 'tomorrow':
+            normalized_count += 1
+            return (today + timedelta(days=1)).strftime("%d/%m/%Y")
+
+        # "in X hour(s)" / "in X hours"
+        m = re.match(r'^in\s+(\d+)\s+hours?$', val.lower())
+        if m:
+            normalized_count += 1
+            return today.strftime("%d/%m/%Y")
+
+        # "D Mon YYYY" / "DD Mon YYYY" (ex: 5 Jul 2026, 15 Mar 2026, 4 Sept 2026)
+        m = re.match(r'^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$', val)
+        if m:
+            day_str, month_str, year_str = m.groups()
+            try:
+                # Gérer "Sept" → "Sep"
+                month_clean = month_str[:3]
+                dt = datetime.strptime(f"{day_str} {month_clean} {year_str}", "%d %b %Y")
+                normalized_count += 1
+                return dt.strftime("%d/%m/%Y")
+            except ValueError:
+                pass
+
+        # "D Mon" / "DD Mon" sans année (ex: 18 Mar, 1 Apr, 1 Jan)
+        m = re.match(r'^(\d{1,2})\s+([A-Za-z]+)$', val)
+        if m:
+            day_str, month_str = m.groups()
+            try:
+                month_clean = month_str[:3]
+                # Essayer avec l'année courante d'abord
+                dt = datetime.strptime(f"{day_str} {month_clean} {today.year}", "%d %b %Y")
+                # Si la date est passée, utiliser l'année suivante
+                if dt.date() < today.date():
+                    dt = dt.replace(year=today.year + 1)
+                normalized_count += 1
+                return dt.strftime("%d/%m/%Y")
+            except ValueError:
+                pass
+
+        # "Month DDth, YYYY" (ex: January 5th, 2026)
+        m = re.match(r'^([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})$', val)
+        if m:
+            month_str, day_str, year_str = m.groups()
+            try:
+                month_clean = month_str[:3]
+                dt = datetime.strptime(f"{day_str} {month_clean} {year_str}", "%d %b %Y")
+                normalized_count += 1
+                return dt.strftime("%d/%m/%Y")
+            except ValueError:
+                pass
+
+        # Format non reconnu → garder tel quel
+        return val
+
+    df[col_name] = df[col_name].apply(_parse_date)
+
+    print(f"   ✅ {normalized_count}/{total} dates normalisées au format DD/MM/YYYY")
+
+    return df
+
+
+# ============================================================================
 # CRÉATION DU GOOGLE SPREADSHEET
 # ============================================================================
 
@@ -503,6 +627,9 @@ def main(manual_date: str = None):
     if df_nouveaux.empty:
         print("\n⚠️ Aucun nouveau code trouvé. Arrêt.")
         return None
+
+    # Normaliser les dates d'expiration au format DD/MM/YYYY
+    df_nouveaux = normalize_expiry_dates(df_nouveaux)
 
     # Créer le Google Spreadsheet avec les résultats
     url = create_output_spreadsheet(gc, df_nouveaux, date_output)
