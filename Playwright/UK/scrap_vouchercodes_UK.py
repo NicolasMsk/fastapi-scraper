@@ -22,12 +22,12 @@ def scrape_vouchercodes_all(page, context, url):
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(800)
 
         # Fermer cookie banner
         try:
-            page.click("#onetrust-accept-btn-handler", timeout=3000)
-            page.wait_for_timeout(500)
+            page.click("#onetrust-accept-btn-handler", timeout=1500)
+            page.wait_for_timeout(300)
         except:
             pass
 
@@ -88,20 +88,20 @@ def scrape_vouchercodes_all(page, context, url):
         # Cliquer sur le premier bouton pour ouvrir le nouvel onglet
         first_btn = get_code_buttons.first
         first_btn.scroll_into_view_if_needed()
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(300)
 
         with context.expect_page() as new_page_info:
             first_btn.click()
 
         new_page = new_page_info.value
         new_page.wait_for_load_state("domcontentloaded")
-        new_page.wait_for_timeout(800)
+        new_page.wait_for_timeout(500)
 
         # Itérer sur tous les codes (on en a détecté 'count' au départ)
         # Pattern d'indexation: 0, 0, 1, 2, 3, ..., N-2
         for iteration in range(count):
             try:
-                new_page.wait_for_timeout(500)
+                new_page.wait_for_timeout(300)
 
                 # Chercher le code dans la popup
                 code = None
@@ -163,9 +163,9 @@ def scrape_vouchercodes_all(page, context, url):
                 # Extraire Terms depuis la popup (clic sur "Terms and conditions")
                 try:
                     terms_btn = new_page.locator("button[data-qa='el:offerTerms']").first
-                    terms_btn.wait_for(state="visible", timeout=1500)
+                    terms_btn.wait_for(state="visible", timeout=1000)
                     terms_btn.click()
-                    new_page.wait_for_timeout(300)
+                    new_page.wait_for_timeout(200)
                     terms_elem = new_page.locator("div[data-qa='el:visibleTerms']").first
                     if terms_elem.count() > 0:
                         terms = terms_elem.inner_text().strip()
@@ -238,7 +238,7 @@ def scrape_vouchercodes_all(page, context, url):
                 next_index = iteration
                 next_btn = next_buttons.nth(next_index)
                 next_btn.scroll_into_view_if_needed()
-                new_page.wait_for_timeout(300)
+                new_page.wait_for_timeout(200)
 
                 # Ouvrir dans un nouvel onglet
                 with context.expect_page() as next_page_info:

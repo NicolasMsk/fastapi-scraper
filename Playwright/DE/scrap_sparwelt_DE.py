@@ -20,67 +20,63 @@ from gsheet_writer import append_to_gsheet
 def scrape_sparwelt_all(page, context, url):
     """
     Scrape TOUS les codes d'une page Sparwelt avec Playwright.
-    Chaque clic ouvre un nouvel onglet → switch → récupérer code → fermer → répéter
+    Approche rapide: JS clicks, suppression du cookie banner.
     """
     results = []
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(3000)
-        
-        # Fermer cookie banner si présent
         try:
-            page.click("button:has-text('Akzeptieren'), button:has-text('Accept'), #onetrust-accept-btn-handler", timeout=3000)
-            page.wait_for_timeout(1000)
+            page.wait_for_selector("div[data-voucher-id]", timeout=3000)
         except:
-            pass
-        
-        # Sélecteur: boutons "Gutschein anzeigen" (pas "Zum Angebot" ni "Cashback")
-        # EXCLURE les codes expirés qui ont la classe "filter grayscale"
+            page.wait_for_timeout(500)
+
+        # Supprimer le cookie banner (cmpwrapper bloque les clics)
+        page.evaluate('() => { var el = document.getElementById("cmpwrapper"); if(el) el.remove(); }')
+        page.wait_for_timeout(200)
+
         code_selector = "div[data-voucher-id]:not(.grayscale) button:has-text('Gutschein anzeigen')"
-        
-        see_code_buttons = page.locator(code_selector)
-        total_count = see_code_buttons.count()
-        
+
+        total_count = page.locator(code_selector).count()
         if total_count == 0:
             return results
 
         processed_codes = set()
 
-        # === ÉTAPE 1: Cliquer sur le premier bouton → ouvre nouvel onglet ===
-        first_btn = see_code_buttons.first
-        first_btn.scroll_into_view_if_needed()
-        page.wait_for_timeout(500)
-        
+        # === Ouvrir le premier bouton via JS click → nouvel onglet ===
         pages_before = len(context.pages)
-        page.evaluate("(el) => el.click()", first_btn.element_handle())
-        page.wait_for_timeout(2000)
-        
-        # Vérifier si nouvel onglet ouvert
-        if len(context.pages) > pages_before:
-            work_page = context.pages[-1]
-        else:
-            work_page = page
+        page.evaluate("""() => {
+            var btns = document.querySelectorAll('div[data-voucher-id]:not(.grayscale) button');
+            for (var b of btns) {
+                if (b.textContent.includes('Gutschein anzeigen')) { b.click(); break; }
+            }
+        }""")
+        try:
+            context.wait_for_event("page", timeout=5000)
+        except:
+            page.wait_for_timeout(500)
 
-        # === ÉTAPE 2: Boucle sur work_page ===
-        max_iterations = 50
-        
-        for iteration in range(max_iterations):
-            work_page.wait_for_timeout(2000)
-            
-            # 1. Récupérer le code dans la popup
+        if len(context.pages) <= pages_before:
+            return results
+        work_page = context.pages[-1]
+        work_page.wait_for_load_state("domcontentloaded", timeout=5000)
+
+        # === Boucle: extraire code, fermer popup, cliquer suivant via JS ===
+        for iteration in range(total_count):
+            work_page.wait_for_timeout(400)
+
+            # 1. Récupérer le code
             code = None
             try:
                 code_elem = work_page.locator("div.p-4 div.border.font-bold span").first
                 if code_elem.count() > 0:
                     code = code_elem.inner_text().strip()
-                    # Filtrer codes invalides
                     if not code or ' ' in code or len(code) > 30:
                         code = None
             except:
                 pass
-            
-            # 2. Récupérer le titre dans la popup
+
+            # 2. Récupérer le titre
             current_title = None
             try:
                 title_elem = work_page.locator("div.p-4 div.text-xl").first
@@ -88,11 +84,11 @@ def scrape_sparwelt_all(page, context, url):
                     current_title = title_elem.inner_text().strip()
             except:
                 pass
-            
+
             if current_title is None:
                 current_title = f"Offre {iteration + 1}"
-            
-            # 2b. Extraire terms + expiry depuis le <dl> de la popup
+
+            # 2b. Extraire terms + expiry depuis le <dl>
             terms = ""
             expiration_date = ""
             try:
@@ -107,9 +103,7 @@ def scrape_sparwelt_all(page, context, url):
                         if (!dd) return;
                         var label = dt.textContent.trim();
                         var value = dd.textContent.trim();
-                        if (label.match(/Gültig bis/)) {
-                            expiry = value;
-                        }
+                        if (label.match(/Gültig bis/)) expiry = value;
                         parts.push(label + ' ' + value);
                     });
                     return {terms: parts.join(' | '), expiry: expiry};
@@ -119,7 +113,7 @@ def scrape_sparwelt_all(page, context, url):
             except:
                 pass
 
-            # Ajouter si code valide et non dupliqué
+            # Ajouter si code valide
             if code and code not in processed_codes:
                 processed_codes.add(code)
                 results.append({
@@ -128,56 +122,47 @@ def scrape_sparwelt_all(page, context, url):
                     "terms": terms,
                     "expiration_date": expiration_date
                 })
-            
-            # 3. Fermer la popup avec le X
+
+            # 3. Fermer la popup
             try:
                 close_btn = work_page.locator("svg.absolute.top-4.right-4, svg.fill-gray-400.absolute").first
                 if close_btn.count() > 0:
-                    close_btn.click(timeout=3000)
-                    work_page.wait_for_timeout(1500)
+                    close_btn.click(timeout=1000)
+                    work_page.wait_for_timeout(200)
             except:
                 try:
                     work_page.keyboard.press("Escape")
-                    work_page.wait_for_timeout(1000)
+                    work_page.wait_for_timeout(200)
                 except:
                     pass
-            
-            # Scroll vers le haut
-            work_page.evaluate("window.scrollTo(0, 0)")
-            work_page.wait_for_timeout(1000)
-            
-            # 4. Chercher le prochain bouton sur work_page
-            next_buttons = work_page.locator(code_selector)
-            next_count = next_buttons.count()
-            
-            next_index = iteration + 1
-            
-            if next_index >= next_count:
+
+            # 4. Cliquer suivant via JS (évite element_handle qui bloque)
+            next_idx = iteration + 1
+            if next_idx >= total_count:
                 break
-            
-            # 5. Cliquer sur le prochain bouton → ouvre nouvel onglet → switch
-            next_btn = next_buttons.nth(next_index)
-            
+
+            clicked = work_page.evaluate(f"""() => {{
+                var btns = document.querySelectorAll('div[data-voucher-id]:not(.grayscale) button');
+                var gutscheinBtns = [];
+                btns.forEach(b => {{ if (b.textContent.includes('Gutschein anzeigen')) gutscheinBtns.push(b); }});
+                if (gutscheinBtns[{next_idx}]) {{
+                    gutscheinBtns[{next_idx}].scrollIntoView({{block: 'center'}});
+                    gutscheinBtns[{next_idx}].click();
+                    return true;
+                }}
+                return false;
+            }}""")
+
+            if not clicked:
+                break
+
             try:
-                next_btn.scroll_into_view_if_needed(timeout=5000)
-                work_page.wait_for_timeout(500)
+                context.wait_for_event("page", timeout=2000)
+                if len(context.pages) > 2:
+                    work_page = context.pages[-1]
             except:
-                work_page.evaluate("window.scrollBy(0, 300)")
-                work_page.wait_for_timeout(500)
-            
-            pages_before = len(context.pages)
-            
-            try:
-                work_page.evaluate("(el) => el.click()", next_btn.element_handle())
-            except:
-                next_btn.click(force=True, timeout=5000)
-            
-            work_page.wait_for_timeout(2000)
-            
-            # Switch vers le nouvel onglet
-            if len(context.pages) > pages_before:
-                work_page = context.pages[-1]
-        
+                work_page.wait_for_timeout(300)
+
     except PlaywrightTimeout:
         pass
     except Exception as e:
@@ -208,6 +193,7 @@ def main():
             viewport={"width": 1920, "height": 1080},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
+        context.set_default_timeout(15000)  # 15s max per operation to prevent hangs
         page = context.new_page()
         
         for idx, (merchant_row, url) in enumerate(competitor_data, 1):
@@ -218,6 +204,11 @@ def main():
             
             try:
                 codes = scrape_sparwelt_all(page, context, url)
+
+                # Fermer tous les onglets sauf le premier pour éviter ERR_INSUFFICIENT_RESOURCES
+                while len(context.pages) > 1:
+                    context.pages[-1].close()
+
                 print(f"   ✅ {len(codes)} codes trouvés")
 
                 for code_info in codes:

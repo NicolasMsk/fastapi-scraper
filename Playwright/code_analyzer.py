@@ -9,7 +9,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -85,18 +85,26 @@ def get_gspread_client():
     return gspread.authorize(creds)
 
 
+def get_last_monday():
+    """Retourne la date du dernier lundi (ou aujourd'hui si lundi)."""
+    today = datetime.now()
+    days_since_monday = today.weekday()  # 0=lundi, 6=dimanche
+    last_monday = today - timedelta(days=days_since_monday)
+    return last_monday
+
+
 def find_todays_spreadsheet(client):
     """
-    Trouve le spreadsheet du jour dans Google Drive.
-    
+    Trouve le spreadsheet du dernier lundi dans Google Drive.
+
     Args:
         client: Client gspread authentifié
-    
+
     Returns:
         Objet Spreadsheet ou None si non trouvé
     """
-    today = datetime.now().strftime("%m_%d_%Y")  # Format: MM_DD_YYYY
-    spreadsheet_name = SPREADSHEET_NAME_FORMAT.format(date=today)
+    last_monday = get_last_monday().strftime("%m_%d_%Y")  # Format: MM_DD_YYYY
+    spreadsheet_name = SPREADSHEET_NAME_FORMAT.format(date=last_monday)
     
     print(f"🔍 Recherche du spreadsheet: {spreadsheet_name}")
     
@@ -127,20 +135,32 @@ def ensure_llm_columns(worksheet):
     except ValueError:
         raise ValueError("Colonne 'Title' non trouvée dans le header")
 
-    # Vérifier et ajouter Rewritten_Title (après Title)
+    # Vérifier et ajouter Rewritten_Title et Rewritten_Title_2 (après Title)
     rewritten_title_col = title_idx + 1
     if len(header) < rewritten_title_col or header[rewritten_title_col - 1] != "Rewritten_Title":
-        print(f"   📝 Ajout de la colonne Rewritten_Title (col {rewritten_title_col})")
+        print(f"   📝 Ajout des colonnes Rewritten_Title et Rewritten_Title_2 (col {rewritten_title_col}-{rewritten_title_col+1})")
         worksheet.insert_cols(values=[["Rewritten_Title"]], col=rewritten_title_col)
-        print(f"   ✅ Colonne ajoutée: Rewritten_Title")
+        worksheet.insert_cols(values=[["Rewritten_Title_2"]], col=rewritten_title_col + 1)
+        print(f"   ✅ Colonnes ajoutées: Rewritten_Title, Rewritten_Title_2")
     else:
         print(f"   ✅ Colonne Rewritten_Title déjà présente")
+        # Check if Rewritten_Title_2 exists right after
+        header = worksheet.row_values(1)
+        rt_idx = header.index("Rewritten_Title")
+        if rt_idx + 1 >= len(header) or header[rt_idx + 1] != "Rewritten_Title_2":
+            insert_col = rt_idx + 2  # 1-based
+            print(f"   📝 Ajout de la colonne Rewritten_Title_2 (col {insert_col})")
+            worksheet.insert_cols(values=[["Rewritten_Title_2"]], col=insert_col)
+            print(f"   ✅ Colonne ajoutée: Rewritten_Title_2")
+        else:
+            print(f"   ✅ Colonne Rewritten_Title_2 déjà présente")
 
-    # Re-lire le header pour être sûr d'avoir le bon indice
+    # Re-lire le header pour être sûr d'avoir les bons indices
     header = worksheet.row_values(1)
     rewritten_title_col = header.index("Rewritten_Title") + 1
+    rewritten_title_2_col = header.index("Rewritten_Title_2") + 1
 
-    return title_idx, rewritten_title_col
+    return title_idx, rewritten_title_col, rewritten_title_2_col
 
 
 def get_missing_codes(worksheet, batch_size: int = 100):
@@ -156,13 +176,13 @@ def get_missing_codes(worksheet, batch_size: int = 100):
     """
     print(f"📥 Récupération des données de la sheet '{worksheet.title}'...")
 
-    # S'assurer que la colonne Rewritten_Title existe
-    title_idx, rewritten_title_col = ensure_llm_columns(worksheet)
+    # S'assurer que les colonnes Rewritten_Title et Rewritten_Title_2 existent
+    title_idx, rewritten_title_col, rewritten_title_2_col = ensure_llm_columns(worksheet)
 
     all_records = worksheet.get_all_records()
 
-    # Filtrer uniquement ceux qui n'ont PAS encore été traités (pas de Rewritten_Title)
-    unprocessed = [r for r in all_records if not r.get("Rewritten_Title")]
+    # Filtrer uniquement ceux qui n'ont PAS encore été traités (pas de Rewritten_Title ou pas de Rewritten_Title_2)
+    unprocessed = [r for r in all_records if not r.get("Rewritten_Title") or not r.get("Rewritten_Title_2")]
     print(f"   📝 {len(unprocessed)} codes non traités sur {len(all_records)} au total")
 
     # Prendre seulement le batch_size demandé
@@ -177,6 +197,7 @@ def get_missing_codes(worksheet, batch_size: int = 100):
             original_index = all_records.index(record)
             record["_row_index"] = original_index + 2  # +2 pour header et 1-based
             record["_rewritten_col"] = rewritten_title_col
+            record["_rewritten_2_col"] = rewritten_title_2_col
             batch_with_index.append(record)
         except ValueError:
             continue
@@ -222,9 +243,15 @@ def analyze_batch_with_llm(records: list, client: OpenAI, country: str) -> list:
             "title": record.get("Title", "")
         })
 
-    batch_prompt = f"""Process {len(codes_data)} promo codes. For each one:
+    batch_prompt = f"""Process {len(codes_data)} promo codes. For each one, generate TWO different rewritten titles in {language}.
 
-REWRITE THE TITLE in {language} following these rules:
+The two titles MUST be genuinely different from each other — use a different rewriting approach for each:
+- Title 1: Use one approach (e.g. Action-Oriented or Value-First)
+- Title 2: Use a DIFFERENT approach (e.g. Benefit-Driven or a completely different angle/wording)
+
+They should NOT be minor rephrases of each other. They must feel like two distinct titles.
+
+REWRITING RULES:
 {REWRITE_RULES}
 
 IMPORTANT: All rewritten titles MUST be in {language}.
@@ -233,17 +260,17 @@ DATA TO PROCESS:
 {json.dumps(codes_data)}
 
 RESPOND WITH JSON ARRAY ONLY:
-[{{"id":1,"rewritten_title":"...in {language}..."}},...]
+[{{"id":1,"rewritten_title":"...in {language}...","rewritten_title_2":"...in {language}..."}},...]
 """
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": f"Rewrite promo code titles in {language}. JSON array only."},
+            {"role": "system", "content": f"Rewrite promo code titles in {language}. Generate 2 unique versions per title. JSON array only."},
             {"role": "user", "content": batch_prompt}
         ],
-        temperature=0.3,
-        max_tokens=min(len(records) * 40, 16000)  # ~40 tokens par entrée, max 16000
+        temperature=0.5,
+        max_tokens=min(len(records) * 80, 16000)  # ~80 tokens par entrée (2 titles), max 16000
     )
 
     result_text = response.choices[0].message.content.strip()
@@ -297,7 +324,9 @@ def analyze_all_codes(records: list, country: str) -> list:
                 "analysis": analysis
             }
             results.append(result)
-            print(f"   [{idx+1}/{len(records)}] {record.get('Title', '')[:35]} → {analysis['rewritten_title'][:35]}")
+            print(f"   [{idx+1}/{len(records)}] {record.get('Title', '')[:35]}")
+            print(f"      → V1: {analysis.get('rewritten_title', 'N/A')[:50]}")
+            print(f"      → V2: {analysis.get('rewritten_title_2', 'N/A')[:50]}")
         else:
             print(f"   [{idx+1}/{len(records)}] ❌ No result for code {idx+1}")
 
@@ -319,17 +348,17 @@ def update_sheet_with_results(worksheet, results: list):
     # Batch update pour être plus rapide
     updates = []
 
+    from gspread.utils import rowcol_to_a1
+
     for r in results:
         row_index = r["original_data"].get("_row_index")
         rewritten_col = r["original_data"].get("_rewritten_col")
+        rewritten_2_col = r["original_data"].get("_rewritten_2_col")
 
         if not row_index or not rewritten_col:
             continue
 
         analysis = r["analysis"]
-
-        # Convertir les indices de colonnes en lettres (A, B, C, etc.)
-        from gspread.utils import rowcol_to_a1
 
         # Rewritten_Title
         rewritten_cell = rowcol_to_a1(row_index, rewritten_col)
@@ -337,6 +366,14 @@ def update_sheet_with_results(worksheet, results: list):
             "range": rewritten_cell,
             "values": [[analysis["rewritten_title"]]]
         })
+
+        # Rewritten_Title_2
+        if rewritten_2_col and analysis.get("rewritten_title_2"):
+            rewritten_2_cell = rowcol_to_a1(row_index, rewritten_2_col)
+            updates.append({
+                "range": rewritten_2_cell,
+                "values": [[analysis["rewritten_title_2"]]]
+            })
 
     # Faire le batch update
     if updates:
@@ -376,7 +413,8 @@ def save_results_json(results: list, output_path: str = None):
             "country": r["original_data"].get("Country"),
             "code": r["original_data"].get("Code"),
             "original_title": r["original_data"].get("Title"),
-            "rewritten_title": r["analysis"]["rewritten_title"]
+            "rewritten_title": r["analysis"]["rewritten_title"],
+            "rewritten_title_2": r["analysis"].get("rewritten_title_2", "")
         })
 
     output_data = {
@@ -403,21 +441,34 @@ def print_summary(results: list):
     print(f"{'='*60}")
 
 
-def main(batch_size: int = 100, countries: list = None):
+def main(batch_size: int = 100, countries: list = None, manual_date: str = None):
     """
     Fonction principale - traite les codes par pays (sheet par sheet).
-    
+
     Args:
         batch_size: Nombre de codes par batch (défaut: 100)
         countries: Liste des pays à traiter (défaut: tous les pays configurés)
+        manual_date: Date manuelle YYYY-MM-DD pour trouver le spreadsheet (optionnel)
     """
     print("🚀 Démarrage de l'analyse des codes promo...")
     print(f"   📦 Taille des batches: {batch_size}")
     print("")
-    
-    # Récupérer le client et le spreadsheet du jour
+
+    # Récupérer le client et le spreadsheet
     client = get_gspread_client()
-    spreadsheet = find_todays_spreadsheet(client)
+    if manual_date:
+        from datetime import datetime as dt_cls
+        date_output = dt_cls.strptime(manual_date, "%Y-%m-%d").strftime("%m_%d_%Y")
+        spreadsheet_name = SPREADSHEET_NAME_FORMAT.format(date=date_output)
+        print(f"🔍 Recherche du spreadsheet: {spreadsheet_name}")
+        try:
+            spreadsheet = client.open(spreadsheet_name)
+            print(f"   ✅ Spreadsheet trouvé: {spreadsheet.title}")
+        except gspread.SpreadsheetNotFound:
+            print(f"   ❌ Spreadsheet non trouvé: {spreadsheet_name}")
+            spreadsheet = None
+    else:
+        spreadsheet = find_todays_spreadsheet(client)
     
     if not spreadsheet:
         print("❌ Impossible de trouver le spreadsheet du jour!")
@@ -489,8 +540,69 @@ def main(batch_size: int = 100, countries: list = None):
         output_path = save_results_json(all_results)
         print(f"\n✅ Analyse terminée!")
         print(f"📁 Backup JSON: {output_path}")
-    
+
+    # Copier le spreadsheet final (avec titres réécrits) vers le weekly
+    copy_daily_to_weekly(client, spreadsheet)
+
+    # Envoyer l'email uniquement en mode automatique (pas de date manuelle = job GCP)
+    if not manual_date:
+        send_report_email(spreadsheet.url)
+
     return all_results
+
+
+def send_report_email(daily_url):
+    """Trigger l'Apps Script Web App pour envoyer l'email de rapport."""
+    import urllib.request
+    import urllib.parse
+
+    WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwy4zZjE3HbCtTBl-fWqhXP2Ed_CSHZavS24GbRjn3_TmOqSt685M5rCRMO5qqaJLag/exec"
+
+    print(f"\n{'='*60}")
+    print(f"📧 ENVOI DE L'EMAIL DE RAPPORT")
+    print(f"{'='*60}")
+
+    try:
+        params = urllib.parse.urlencode({"dailyUrl": daily_url})
+        url = f"{WEBAPP_URL}?{params}"
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = resp.read().decode("utf-8")
+            print(f"   ✅ {body}")
+    except Exception as e:
+        print(f"   ❌ Erreur envoi email: {e}")
+
+
+def copy_daily_to_weekly(client, daily_spreadsheet):
+    """Copie le spreadsheet daily (avec titres réécrits) vers le weekly."""
+    WEEKLY_ID = "1Z8Pv2T0C1nEskilsfuMoPI-dMytXWF-gKwpfZ9a8e_A"
+
+    print(f"\n{'='*60}")
+    print(f"📋 COPIE VERS WEEKLY SPREADSHEET")
+    print(f"{'='*60}")
+
+    try:
+        weekly = client.open_by_key(WEEKLY_ID)
+    except Exception as e:
+        print(f"❌ Erreur ouverture weekly: {e}")
+        return
+
+    for sheet in daily_spreadsheet.worksheets():
+        name = sheet.title
+        data = sheet.get_all_values()
+        if not data:
+            continue
+
+        try:
+            ws = weekly.worksheet(name)
+        except gspread.WorksheetNotFound:
+            ws = weekly.add_worksheet(title=name, rows=len(data), cols=len(data[0]))
+
+        ws.clear()
+        ws.update(values=data, range_name='A1')
+        print(f"   ✅ {name}: {len(data)-1} lignes")
+
+    print(f"📊 Weekly spreadsheet mis à jour")
 
 
 if __name__ == "__main__":

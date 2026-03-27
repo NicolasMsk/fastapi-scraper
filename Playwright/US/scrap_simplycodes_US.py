@@ -6,6 +6,7 @@ Script Playwright pour scraper TOUS les codes SimplyCodes (US)
 
 import os
 import sys
+import random
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
@@ -16,182 +17,54 @@ from gsheet_writer import append_to_gsheet
 
 
 def scrape_simplycodes_all(page, context, url):
-    """Scrape tous les codes d'une page SimplyCodes - VERSION OPTIMISÉE"""
+    """
+    Scrape tous les codes d'une page SimplyCodes.
+    Les codes sont visibles dans le DOM sans cliquer (dans les code verifications).
+    On extrait directement via JS, sans ouvrir de nouvel onglet (Cloudflare bloque).
+    """
     results = []
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(1500)
-        
-        # Vérifier s'il y a des boutons "Show Code"
+        page.wait_for_timeout(random.randint(1500, 3000))
+
+        # Si Cloudflare bloque, recréer le contexte
+        if page.evaluate('() => document.body.innerText.includes("been blocked")'):
+            return results
+
         has_codes = page.locator("[data-testid='promotion-copy-code-button']").count()
-        
         if has_codes == 0:
             return results
-        
-        # UN SEUL clic pour déclencher l'authentification
-        first_btn = page.locator("[data-testid='promotion-copy-code-button']").first
-        
-        try:
-            with context.expect_page(timeout=8000) as new_page_info:
-                first_btn.click()
-            new_page = new_page_info.value
-            new_page.wait_for_load_state("domcontentloaded")
-            new_page.wait_for_timeout(1000)
-        except:
-            new_page = page
-            new_page.wait_for_timeout(1000)
-        
-        # D'ABORD: récupérer le code de la popup (premier code)
-        try:
-            popup_code = new_page.evaluate("""() => {
-                const input = document.querySelector('input[readonly]');
-                if (input && input.value && input.value.length >= 3) return input.value.trim();
-                const span = document.querySelector('span.font-bold.uppercase.truncate');
-                if (span && span.textContent.trim().length >= 3) return span.textContent.trim();
-                return null;
-            }""")
-            
-            popup_title = new_page.evaluate("""() => {
-                const el = document.querySelector("[data-testid='promotion-subtitle']");
-                return el ? el.textContent.trim() : null;
-            }""")
-            
-            if popup_code and popup_title and popup_code not in ['Show Code', 'Copy', 'Copied!']:
-                results.append({"code": popup_code, "title": popup_title, "terms": "", "expiration_date": ""})
-        except:
-            pass
-        
-        # FERMER LA POPUP avec le bouton X ou clic extérieur
-        try:
-            close_btn = new_page.locator("button:has(span.i-ph\\:x), button:has(span[class*='i-ph'][class*='x'])").first
-            if close_btn.count() > 0:
-                close_btn.click()
-                new_page.wait_for_timeout(500)
-            else:
-                new_page.mouse.click(10, 10)
-                new_page.wait_for_timeout(500)
-        except:
-            pass
-        
-        # Cliquer sur "Show more" 2 fois pour afficher plus de codes
-        for i in range(2):
-            try:
-                show_more = new_page.locator("button:text-is('Show more')").first
-                if show_more.count() == 0:
-                    show_more = new_page.locator("button:has-text('Show more')").first
-                
-                if show_more.count() > 0:
-                    show_more.scroll_into_view_if_needed()
-                    new_page.wait_for_timeout(200)
-                    show_more.click(force=True)
-                    new_page.wait_for_timeout(1000)
-                else:
-                    break
-            except:
-                break
-        
-        # Cliquer tous les "See X code verifications" fermés pour révéler les terms
-        try:
-            for _ in range(50):
-                closed_toggles = new_page.locator("article.bg-gray-700:has(p:text('code verifications')):has(span.rotate-0)")
-                if closed_toggles.count() == 0:
-                    break
-                try:
-                    closed_toggles.first.scroll_into_view_if_needed()
-                    closed_toggles.first.click(timeout=1000)
-                    new_page.wait_for_timeout(200)
-                except:
-                    break
-            new_page.wait_for_timeout(300)
-        except:
-            pass
 
-        # Pré-extraire title→terms depuis la page AVANT extraction des codes
-        title_to_terms = {}
-        title_terms_data = new_page.evaluate("""() => {
-            const pairs = [];
-            document.querySelectorAll("[data-testid='promotion-copy-code-button']").forEach(btn => {
-                let card = btn;
-                for (let i = 0; i < 10; i++) {
-                    card = card.parentElement;
-                    if (!card) break;
-                    const titleEl = card.querySelector("[data-testid='promotion-subtitle']");
-                    if (titleEl) {
-                        const title = titleEl.textContent.trim();
-                        // Chercher l'article terms (contient des h4, pas le toggle bg-gray-700)
-                        const articles = card.querySelectorAll('article');
-                        let terms = '';
-                        for (const art of articles) {
-                            if (art.querySelector('h4')) {
-                                terms = art.textContent.trim();
-                                break;
-                            }
-                        }
-                        pairs.push([title, terms]);
-                        break;
-                    }
-                }
-            });
-            return pairs;
-        }""")
-        for pair in title_terms_data:
-            if pair[0]:
-                title_to_terms[pair[0]] = pair[1]
-
-        # EXTRACTION COMPLÈTE VIA JAVASCRIPT - INSTANTANÉ
-        all_codes = new_page.evaluate("""() => {
+        # Extraction directe via .coupon-card-container (pas de "Show more" qui casse la page)
+        # Les codes sont dans des spans avec classe "uppercase underline" (code verifications)
+        all_codes = page.evaluate("""() => {
             const results = [];
-            document.querySelectorAll("[data-testid='promotion-copy-code-button']").forEach(btn => {
-                const parent = btn.closest('div');
-                if (!parent) return;
-                
-                const codeSpan = parent.querySelector('span.font-bold, span.uppercase, span[class*="truncate"]');
-                const code = codeSpan ? codeSpan.textContent.trim() : null;
-                
-                let card = btn;
-                for (let i = 0; i < 10; i++) {
-                    card = card.parentElement;
-                    if (!card) break;
-                    const titleEl = card.querySelector("[data-testid='promotion-subtitle']");
-                    if (titleEl) {
-                        const title = titleEl.textContent.trim();
-                        if (code && code.length >= 3 && !['Show Code', 'Copy', 'Copied!', 'Show code'].includes(code)) {
-                            results.push({code, title});
-                        }
-                        break;
+            document.querySelectorAll('.coupon-card-container').forEach(card => {
+                const titleEl = card.querySelector("[data-testid='promotion-subtitle']");
+                const codeSpan = card.querySelector('span.uppercase.underline');
+                const hasShowCode = card.querySelector("[data-testid='promotion-copy-code-button']");
+                if (titleEl && codeSpan && hasShowCode) {
+                    const code = codeSpan.textContent.trim();
+                    if (code.length >= 3 && code.length <= 30) {
+                        results.push({code: code, title: titleEl.textContent.trim()});
                     }
                 }
             });
             return results;
         }""")
-        
-        # Dédupliquer et associer les terms
-        seen = {r["code"] for r in results}
+
+        seen = set()
         for item in all_codes:
             code = item.get('code')
             title = item.get('title')
             if code and title and code not in seen:
                 seen.add(code)
-                terms = title_to_terms.get(title, '')
-                results.append({"code": code, "title": title, "terms": terms, "expiration_date": ""})
+                results.append({"code": code, "title": title, "terms": "", "expiration_date": ""})
 
-        # Mettre à jour les terms du premier code (extrait de la popup avant les toggles)
-        if results and not results[0].get("terms") and results[0]["title"] in title_to_terms:
-            results[0]["terms"] = title_to_terms[results[0]["title"]]
-
-        # Logs
         for r in results:
             print(f"[SimplyCodes] ✅ Code: {r['code']} | {r['title'][:50]}...")
-            print(f"[SimplyCodes]    📋 Terms: {'Yes' if r['terms'] else 'No'}")
-        
-        # Fermer le nouvel onglet
-        if new_page != page:
-            try:
-                new_page.close()
-            except:
-                pass
-        
+
     except Exception as e:
         print(f"      ❌ Erreur: {str(e)[:50]}")
     
@@ -211,11 +84,35 @@ def main():
     print(f"\n🚀 Lancement de Playwright...")
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # headless=False pour bypass Cloudflare (xvfb-run sur GCP)
+        browser = p.chromium.launch(
+            headless=False,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--disable-site-isolation-trials",
+                "--disable-gpu",
+                "--no-sandbox",
+            ]
+        )
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+            locale="en-US",
+            timezone_id="America/New_York",
         )
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            window.chrome = {runtime: {}, loadTimes: function(){}, csi: function(){}};
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                    Promise.resolve({state: Notification.permission}) :
+                    originalQuery(parameters)
+            );
+        """)
         page = context.new_page()
         
         for idx, (merchant_row, url) in enumerate(competitor_data, 1):
@@ -244,9 +141,12 @@ def main():
                     })
             except Exception as e:
                 print(f"   ❌ Erreur: {str(e)[:50]}")
-            
+
             print(f"   📝 Total: {len(all_results)} codes")
-        
+
+            # Délai aléatoire entre les pages pour éviter le rate limiting Cloudflare
+            page.wait_for_timeout(random.randint(500, 1500))
+
         browser.close()
     
     if all_results:

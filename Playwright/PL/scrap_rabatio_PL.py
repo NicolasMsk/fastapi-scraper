@@ -41,12 +41,12 @@ def scrape_rabatio_all(page, context, url):
     try:
         print(f"[Rabatio] Accès à l'URL: {url}")
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(2500)
+        page.wait_for_timeout(1000)
 
         # Accepter cookies - Cookiebot
         try:
-            page.click("#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll", timeout=3000)
-            page.wait_for_timeout(500)
+            page.click("#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll", timeout=1500)
+            page.wait_for_timeout(300)
             print("[Rabatio] Cookie fermé")
         except:
             pass
@@ -98,11 +98,11 @@ def scrape_rabatio_all(page, context, url):
         # === STEP 1: Cliquer sur le 1er bouton pour ouvrir le nouvel onglet ===
         first_btn = code_buttons.first
         first_btn.scroll_into_view_if_needed()
-        page.wait_for_timeout(300)
+        page.wait_for_timeout(200)
 
         pages_before = len(context.pages)
         first_btn.click()
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(800)
 
         if len(context.pages) <= pages_before:
             print("[Rabatio] ⚠️ Pas de nouvel onglet ouvert")
@@ -110,14 +110,14 @@ def scrape_rabatio_all(page, context, url):
 
         # Switch vers le nouvel onglet
         new_page = context.pages[-1]
-        new_page.wait_for_timeout(1000)
+        new_page.wait_for_timeout(500)
 
         # === STEP 2: Boucler sur le nouvel onglet ===
         max_iterations = min(total_count + 5, 25)
 
         for iteration in range(max_iterations):
             try:
-                new_page.wait_for_timeout(1000)
+                new_page.wait_for_timeout(500)
 
                 # Extraire le code depuis span.code-text
                 code = None
@@ -155,13 +155,13 @@ def scrape_rabatio_all(page, context, url):
 
                 # Fermer la popup fancybox
                 try:
-                    new_page.click("button[data-fancybox-close]", timeout=2000)
-                    new_page.wait_for_timeout(500)
+                    new_page.click("button[data-fancybox-close]", timeout=1500)
+                    new_page.wait_for_timeout(300)
                 except:
                     pass
 
                 # Trouver le bouton suivant sur le nouvel onglet
-                new_page.wait_for_timeout(300)
+                new_page.wait_for_timeout(200)
                 next_buttons = new_page.locator("xpath=//div[contains(@class, 'rabat__list-item--button') and not(.//span[contains(text(), 'wygasł')])]//a[contains(@class, 'js-get-coupon') and @data-action-type='show_code']")
                 current_index = len(results)
 
@@ -176,12 +176,12 @@ def scrape_rabatio_all(page, context, url):
                 # Cliquer sur le bouton suivant
                 pages_before = len(context.pages)
                 next_btn.click()
-                new_page.wait_for_timeout(1000)
+                new_page.wait_for_timeout(500)
 
                 # Si un nouveau tab s'ouvre, switcher dessus
                 if len(context.pages) > pages_before:
                     new_page = context.pages[-1]
-                    new_page.wait_for_timeout(500)
+                    new_page.wait_for_timeout(300)
 
             except Exception as e:
                 print(f"[Rabatio] ⚠️ Erreur itération {iteration}: {str(e)[:40]}")

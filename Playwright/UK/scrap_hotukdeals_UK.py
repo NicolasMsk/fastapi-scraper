@@ -32,12 +32,12 @@ def scrape_hotukdeals_all(page, context, url):
     try:
         # Navigate to page with domcontentloaded strategy
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(1500)  # Réduit de 3000 à 1500
+        page.wait_for_timeout(800)
         
         # Close cookie consent popups
         try:
-            page.click("button:has-text('Accept'), button:has-text('Agree'), #onetrust-accept-btn-handler", timeout=2000)
-            page.wait_for_timeout(500)  # Réduit de 1000 à 500
+            page.click("button:has-text('Accept'), button:has-text('Agree'), #onetrust-accept-btn-handler", timeout=1500)
+            page.wait_for_timeout(300)
         except:
             pass
         
@@ -89,34 +89,32 @@ def scrape_hotukdeals_all(page, context, url):
 
         # Track processed codes and titles to avoid duplicates
         processed_codes = set()
-        processed_titles = set()  # Avoid duplicate titles as well
-        
+        processed_titles = set()
+
         # === STEP 1: Click on first button to open new tab ===
         first_btn = see_code_buttons.first
         first_btn.scroll_into_view_if_needed()
-        page.wait_for_timeout(300)  # Réduit de 500 à 300
-        
-        # Click using JavaScript evaluation
+        page.wait_for_timeout(200)
+
         pages_before = len(context.pages)
         page.evaluate("(el) => el.click()", first_btn.element_handle())
-        page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
-        
-        # Verify new tab opened
+        page.wait_for_timeout(500)
+
         if len(context.pages) <= pages_before:
             return results
 
-        # Switch to new tab
         new_page = context.pages[-1]
-        new_page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
+        new_page.wait_for_timeout(500)
 
         # === STEP 2: Loop through all codes on new tab ===
-        max_iterations = min(total_count + 5, 25)
-        
-        for iteration in range(max_iterations):
+        # Use a navigation index separate from results count
+        nav_index = 0
+
+        for iteration in range(total_count):
             try:
-                new_page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
-                
-                # STEP 1: Extract code (h4 with class b8qpi*)
+                new_page.wait_for_timeout(500)
+
+                # Extract code (h4 with class b8qpi*)
                 code = None
                 try:
                     code_elem = new_page.locator("h4[class*='b8qpi']").first
@@ -124,7 +122,7 @@ def scrape_hotukdeals_all(page, context, url):
                         code = code_elem.inner_text().strip()
                 except:
                     pass
-                
+
                 # Fallback: search all h4 elements for valid code
                 if not code:
                     try:
@@ -136,8 +134,8 @@ def scrape_hotukdeals_all(page, context, url):
                                 break
                     except:
                         pass
-                
-                # STEP 2: Extract title from POPUP (h4.az57m without b8qpi)
+
+                # Extract title from POPUP (h4.az57m without b8qpi)
                 current_title = None
                 try:
                     title_elems = new_page.locator("xpath=//h4[contains(@class, 'az57m') and not(contains(@class, 'b8qpi'))]")
@@ -145,17 +143,16 @@ def scrape_hotukdeals_all(page, context, url):
                         current_title = title_elems.first.inner_text().strip()
                 except:
                     pass
-                
+
                 # Fallback: get title from card h3 element
                 if not current_title:
                     try:
                         h3_elems = new_page.locator("div[data-testid='vouchers-ui-voucher-card-description'] h3")
-                        idx = len(results)
-                        if h3_elems.count() > idx:
-                            current_title = h3_elems.nth(idx).inner_text().strip()
+                        if h3_elems.count() > nav_index:
+                            current_title = h3_elems.nth(nav_index).inner_text().strip()
                     except:
                         pass
-                
+
                 # Expiration_Date pré-extraite depuis la page listing (lookup par titre)
                 expiration_date = ""
                 if current_title and current_title in title_to_expiry:
@@ -175,19 +172,26 @@ def scrape_hotukdeals_all(page, context, url):
                     results.append({"code": code, "title": current_title, "expiration_date": expiration_date})
                     print(f"[HotUKDeals] ✅ Code: {code} | {current_title[:50]}...")
                     print(f"[HotUKDeals]    📅 Expiry: {expiration_date if expiration_date else 'N/A'}")
-                
-                # STEP 3: Close the popup
+
+                # Advance navigation index regardless of extraction success
+                nav_index += 1
+
+                # Stop if we've processed all buttons
+                if nav_index >= total_count:
+                    break
+
+                # Close the popup
                 try:
                     close_icon = new_page.locator("span[data-testid='CloseIcon'], svg[data-testid='CloseIcon']").first
                     if close_icon.count() > 0:
-                        close_icon.click(timeout=2000)
-                        new_page.wait_for_timeout(500)  # Réduit de 1000 à 500
+                        close_icon.click(timeout=1500)
+                        new_page.wait_for_timeout(300)
                 except:
                     pass
-                
-                # STEP 4: Find next button (with same exclusions)
-                new_page.wait_for_timeout(300)  # Réduit de 500 à 300
-                
+
+                # Find and click next button (with same exclusions)
+                new_page.wait_for_timeout(200)
+
                 xpath_next = """
                     //div[@data-testid='vouchers-ui-voucher-card-description'][.//h3]
                         [not(ancestor::div[contains(@class, '_1hla7140')])]
@@ -195,31 +199,28 @@ def scrape_hotukdeals_all(page, context, url):
                         [not(ancestor::div[@data-testid='vouchers-ui-voucher-card']//div[contains(text(), 'Exclusive')])]
                     //div[@role='button' and contains(@title, 'See Code')]
                 """.replace('\n', '').replace('    ', '')
-                
-                # Get all valid buttons
+
                 next_buttons = new_page.locator(f"xpath={xpath_next}")
-                current_index = len(results)
-                
-                # Check if we've processed all available codes
-                # Get button at current index
-                next_btn = next_buttons.nth(current_index)
+
+                if next_buttons.count() <= nav_index:
+                    break
+
+                next_btn = next_buttons.nth(nav_index)
                 next_btn.scroll_into_view_if_needed()
-                new_page.wait_for_timeout(200)  # Réduit de 300 à 200
-                
-                # Click button using JavaScript
+                new_page.wait_for_timeout(200)
+
                 pages_before = len(context.pages)
                 new_page.evaluate("(el) => el.click()", next_btn.element_handle())
-                new_page.wait_for_timeout(1000)  # Réduit de 2000 à 1000
-                
-                # If a new tab opened, switch to it
+                new_page.wait_for_timeout(500)
+
                 if len(context.pages) > pages_before:
                     new_page = context.pages[-1]
-                    new_page.wait_for_timeout(500)  # Réduit de 1000 à 500
-                
+                    new_page.wait_for_timeout(300)
+
             except Exception as e:
-                # Exit loop if any error occurs
+                print(f"      ⚠️ Iteration {iteration} error: {str(e)[:80]}")
                 break
-        
+
         # Close all opened tabs except the main one
         for p in context.pages[1:]:
             try:

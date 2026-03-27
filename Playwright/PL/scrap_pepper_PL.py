@@ -33,12 +33,12 @@ def scrape_pepper_all(page, context, url, exclusive_only=False):
     try:
         # Navigate to page with domcontentloaded strategy
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(800)
 
         # Close cookie consent popups
         try:
-            page.click("button:has-text('Accept'), button:has-text('Agree'), button:has-text('Akceptuj'), #onetrust-accept-btn-handler", timeout=2000)
-            page.wait_for_timeout(500)
+            page.click("button:has-text('Accept'), button:has-text('Agree'), button:has-text('Akceptuj'), #onetrust-accept-btn-handler", timeout=1500)
+            page.wait_for_timeout(300)
         except:
             pass
 
@@ -109,12 +109,12 @@ def scrape_pepper_all(page, context, url, exclusive_only=False):
         # === STEP 1: Click on first button to open new tab ===
         first_btn = see_code_buttons.first
         first_btn.scroll_into_view_if_needed()
-        page.wait_for_timeout(300)
+        page.wait_for_timeout(200)
 
         # Click using JavaScript evaluation
         pages_before = len(context.pages)
         page.evaluate("(el) => el.click()", first_btn.element_handle())
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(500)
 
         # Verify new tab opened
         if len(context.pages) <= pages_before:
@@ -122,14 +122,14 @@ def scrape_pepper_all(page, context, url, exclusive_only=False):
 
         # Switch to new tab
         new_page = context.pages[-1]
-        new_page.wait_for_timeout(1000)
+        new_page.wait_for_timeout(500)
 
         # === STEP 2: Loop through all codes on new tab ===
         max_iterations = min(total_count + 5, 25)
 
         for iteration in range(max_iterations):
             try:
-                new_page.wait_for_timeout(1000)
+                new_page.wait_for_timeout(500)
 
                 # STEP 1: Extract code (h4 with class b8qpi*)
                 code = None
@@ -176,8 +176,8 @@ def scrape_pepper_all(page, context, url, exclusive_only=False):
                 try:
                     terms_btn = new_page.locator("button.ekdzs0:has-text('warunki')").first
                     if terms_btn.count() > 0:
-                        terms_btn.click(timeout=2000)
-                        new_page.wait_for_timeout(500)
+                        terms_btn.click(timeout=1500)
+                        new_page.wait_for_timeout(300)
                         terms_elem = new_page.locator("div[data-testid='voucherPopup-collapsablePanel-root'] div[data-testid='rich-text-root']").first
                         if terms_elem.count() > 0:
                             terms = terms_elem.inner_text().strip()
@@ -201,13 +201,13 @@ def scrape_pepper_all(page, context, url, exclusive_only=False):
                 try:
                     close_icon = new_page.locator("span[data-testid='CloseIcon'], svg[data-testid='CloseIcon']").first
                     if close_icon.count() > 0:
-                        close_icon.click(timeout=2000)
-                        new_page.wait_for_timeout(500)
+                        close_icon.click(timeout=1500)
+                        new_page.wait_for_timeout(300)
                 except:
                     pass
 
                 # STEP 4: Find next button (with same exclusions)
-                new_page.wait_for_timeout(300)
+                new_page.wait_for_timeout(200)
 
                 if exclusive_only:
                     xpath_next = """
@@ -238,12 +238,12 @@ def scrape_pepper_all(page, context, url, exclusive_only=False):
                 # Click button using JavaScript
                 pages_before = len(context.pages)
                 new_page.evaluate("(el) => el.click()", next_btn.element_handle())
-                new_page.wait_for_timeout(1000)
+                new_page.wait_for_timeout(500)
 
                 # If a new tab opened, switch to it
                 if len(context.pages) > pages_before:
                     new_page = context.pages[-1]
-                    new_page.wait_for_timeout(500)
+                    new_page.wait_for_timeout(300)
 
             except Exception as e:
                 # Exit loop if any error occurs

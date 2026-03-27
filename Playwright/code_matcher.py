@@ -41,6 +41,9 @@ BIGQUERY_PROJECT_ID = "prj-grp-coupons-dev-9996"
 # Dossier Google Drive pour les outputs
 OUTPUT_FOLDER_ID = "1w04EnXt7AVPOGsrxQGwGE9IfJmRXOerm"
 
+# Weekly spreadsheet (copie de l'output)
+WEEKLY_SPREADSHEET_ID = "1Z8Pv2T0C1nEskilsfuMoPI-dMytXWF-gKwpfZ9a8e_A"
+
 # Pays à traiter
 COUNTRIES = ['AU', 'PL', 'US', 'IT', 'UK', 'ES', 'FR', 'DE']
 
@@ -297,10 +300,10 @@ def match_codes(df_missing: pd.DataFrame, df_content: pd.DataFrame, df_teahupoo:
 
     # Nettoyer pour le matching
     df_missing['Code_clean'] = df_missing['Code'].astype(str).str.strip().str.upper()
-    df_missing['Merchant_ID_clean'] = df_missing['Merchant_ID'].astype(str).str.strip()
+    df_missing['Merchant_ID_clean'] = df_missing['Merchant_ID'].astype(str).str.strip().str.replace('.0', '', regex=False)
 
     df_content_filtered['offer_code_clean'] = df_content_filtered['offer_code'].astype(str).str.strip().str.upper()
-    df_content_filtered['cc_merchant_id_clean'] = df_content_filtered['cc_merchant_id'].astype(str).str.strip()
+    df_content_filtered['cc_merchant_id_clean'] = df_content_filtered['cc_merchant_id'].astype(str).str.strip().str.replace('.0', '', regex=False)
 
     # Créer les clés de matching
     df_missing['matching_key'] = df_missing['Merchant_ID_clean'] + '|' + df_missing['Code_clean']
@@ -574,6 +577,73 @@ def create_output_spreadsheet(gc, df: pd.DataFrame, date_str: str) -> str:
 
 
 # ============================================================================
+# COPIE VERS LE SPREADSHEET WEEKLY
+# ============================================================================
+
+def copy_to_weekly_spreadsheet(gc, df: pd.DataFrame):
+    """
+    Copie les résultats vers le spreadsheet Missing_Deals_Coupons_weekly.
+    Vide chaque sheet pays puis réécrit les données.
+    """
+    print(f"\n{'='*60}")
+    print(f"📋 COPIE VERS WEEKLY SPREADSHEET")
+    print(f"{'='*60}")
+
+    spreadsheet = gc.open_by_key(WEEKLY_SPREADSHEET_ID)
+
+    # Colonnes à exclure (même logique que create_output_spreadsheet)
+    cols_to_exclude = ['Affiliate_link', 'Redirections']
+    insert_after_merchant_id = ['Merchant_tier', 'SEO_grade']
+
+    base_cols = [c for c in df.columns if c not in insert_after_merchant_id and c not in cols_to_exclude]
+    columns = []
+    for col in base_cols:
+        columns.append(col)
+        if col == 'Merchant_ID':
+            for insert_col in insert_after_merchant_id:
+                if insert_col in df.columns:
+                    columns.append(insert_col)
+
+    countries = df['Country'].dropna().unique()
+    total_codes = 0
+
+    for country in sorted(countries):
+        df_country = df[df['Country'] == country].copy()
+
+        # Dédup par marchand+code (même logique)
+        df_country['_code_upper'] = df_country['Code'].astype(str).str.strip().str.upper()
+        df_country = df_country.drop_duplicates(subset=['Merchant_slug', '_code_upper'], keep='first')
+        df_country = df_country.drop(columns=['_code_upper'])
+        df_country = df_country.sort_values('Merchant_slug')
+        df_country = df_country[[c for c in columns if c in df_country.columns]]
+
+        sheet_name = str(country)[:31]
+        try:
+            worksheet = spreadsheet.worksheet(sheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=len(df_country)+1, cols=len(columns))
+
+        # Vider la sheet puis réécrire
+        worksheet.clear()
+        data = [columns] + df_country.fillna('').values.tolist()
+        worksheet.update(values=data, range_name='A1')
+
+        total_codes += len(df_country)
+        print(f"   ✅ {country}: {len(df_country)} codes")
+
+    # Vider aussi Feedback et remettre juste les headers
+    try:
+        feedback_ws = spreadsheet.worksheet("Feedback")
+        feedback_ws.clear()
+        feedback_ws.append_row(columns)
+        print(f"   ✅ Feedback (headers only)")
+    except gspread.exceptions.WorksheetNotFound:
+        pass
+
+    print(f"📊 Weekly spreadsheet mis à jour: {total_codes} codes total")
+
+
+# ============================================================================
 # FONCTION PRINCIPALE
 # ============================================================================
 
@@ -589,17 +659,23 @@ def main(manual_date: str = None):
     print("=" * 80)
 
     # Déterminer les dates
+    # manual_date = date pour filtrer DB_Missing_Code
+    # Teahupoo = toujours le lundi de la semaine en cours
     if manual_date:
-        # Format ISO pour filtrage
-        date_iso = manual_date  # YYYY-MM-DD
         dt = datetime.strptime(manual_date, "%Y-%m-%d")
-        date_teahupoo = dt.strftime("%d_%m_%Y")  # DD_MM_YYYY pour Teahupoo
-        date_output = dt.strftime("%m_%d_%Y")    # MM_DD_YYYY pour output (comme code_analyzer)
     else:
-        now = datetime.now()
-        date_iso = now.strftime("%Y-%m-%d")
-        date_teahupoo = now.strftime("%d_%m_%Y")  # DD_MM_YYYY pour Teahupoo
-        date_output = now.strftime("%m_%d_%Y")    # MM_DD_YYYY pour output
+        dt = datetime.now()
+
+    # Date ISO pour filtrage DB_Missing_Code
+    date_iso = dt.strftime("%Y-%m-%d")
+
+    # Teahupoo = lundi de la semaine de dt
+    days_since_monday = dt.weekday()  # 0=lundi, 6=dimanche
+    dt_monday = dt - timedelta(days=days_since_monday)
+    date_teahupoo = dt_monday.strftime("%d_%m_%Y")  # DD_MM_YYYY pour Teahupoo
+
+    # Output = date du filtrage
+    date_output = dt.strftime("%m_%d_%Y")    # MM_DD_YYYY pour output
 
     print(f"📅 Date ISO (filtrage): {date_iso}")
     print(f"📅 Date Teahupoo: {date_teahupoo}")

@@ -21,36 +21,31 @@ from gsheet_writer import append_to_gsheet
 def scrape_mydealz_all(page, context, url):
     """
     Scrape TOUS les codes d'une page MyDealz avec Playwright.
-    Chaque clic ouvre un nouvel onglet → switch → récupérer code → fermer → répéter
+    Approche rapide: ouvre un onglet, puis itère via JS clicks sur work_page.
     """
     results = []
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        # Attendre que les vouchers soient chargés au lieu d'un wait fixe
         try:
-            page.wait_for_selector("div[data-testid='active-vouchers-widget']", timeout=8000)
+            page.wait_for_selector("div[data-testid='active-vouchers-widget']", timeout=5000)
         except:
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(1000)
 
         # Fermer cookie banner si présent
         try:
-            page.click("button:has-text('Akzeptieren'), button:has-text('Accept'), #onetrust-accept-btn-handler", timeout=2000)
-            page.wait_for_timeout(500)
+            page.click("button:has-text('Akzeptieren'), button:has-text('Accept'), #onetrust-accept-btn-handler", timeout=1500)
+            page.wait_for_timeout(300)
         except:
             pass
-        
-        # Sélecteur: "Code anzeigen" dans active-vouchers-widget UNIQUEMENT (exclut expirés)
+
         code_selector = "div[data-testid='active-vouchers-widget'] div[title='Code anzeigen']"
 
-        see_code_buttons = page.locator(code_selector)
-        total_count = see_code_buttons.count()
-
+        total_count = page.locator(code_selector).count()
         if total_count == 0:
             return results
 
-        # Pré-extraire expiry + terms AVANT de cliquer sur les codes
-        # 1. Pré-extraire le mapping titre -> expiration_date depuis la page listing
+        # 1. Pré-extraire expiry dates
         title_to_expiry = {}
         title_expiry_data = page.evaluate("""() => {
             const cards = document.querySelectorAll("div[data-testid='vouchers-ui-voucher-card']");
@@ -81,15 +76,14 @@ def scrape_mydealz_all(page, context, url):
         details_count = details_buttons.count()
         for i in range(details_count):
             try:
-                btn = details_buttons.nth(i)
-                btn.scroll_into_view_if_needed()
-                btn.click()
-                page.wait_for_timeout(150)
+                details_buttons.nth(i).scroll_into_view_if_needed(timeout=1000)
+                details_buttons.nth(i).click(timeout=1000)
+                page.wait_for_timeout(50)
             except:
                 pass
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(200)
 
-        # 3. Extraire les terms depuis les div rich-text révélées
+        # 3. Extraire les terms
         title_terms_data = page.evaluate("""() => {
             const cards = document.querySelectorAll("div[data-testid='vouchers-ui-voucher-card']");
             const pairs = [];
@@ -98,9 +92,7 @@ def scrape_mydealz_all(page, context, url):
                 const title = h3 ? h3.textContent.trim() : '';
                 let terms = '';
                 const richText = card.querySelector('div[data-testid="rich-text-root"]');
-                if (richText) {
-                    terms = richText.textContent.trim();
-                }
+                if (richText) terms = richText.textContent.trim();
                 if (title) pairs.push([title, terms]);
             });
             return pairs;
@@ -108,118 +100,104 @@ def scrape_mydealz_all(page, context, url):
         for pair in title_terms_data:
             if pair[0] and pair[1]:
                 title_to_terms[pair[0]] = pair[1]
-        if title_to_terms:
-            print(f"[MyDealz] {len(title_to_terms)} terms pré-extraits")
 
         processed_codes = set()
 
-        # === ÉTAPE 1: Cliquer sur le premier bouton → ouvre nouvel onglet ===
-        first_btn = see_code_buttons.first
-        first_btn.scroll_into_view_if_needed()
-
+        # === Ouvrir le premier bouton via JS click → nouvel onglet ===
         pages_before = len(context.pages)
-        page.evaluate("(el) => el.click()", first_btn.element_handle())
-
-        # Attendre le nouvel onglet au lieu d'un wait fixe
+        page.evaluate("""() => {
+            var btn = document.querySelector("div[data-testid='active-vouchers-widget'] div[title='Code anzeigen']");
+            if (btn) { btn.scrollIntoView({block: 'center'}); btn.click(); }
+        }""")
         try:
             context.wait_for_event("page", timeout=5000)
         except:
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(500)
 
-        # Vérifier si nouvel onglet ouvert
-        if len(context.pages) > pages_before:
-            work_page = context.pages[-1]
-        else:
-            work_page = page
+        if len(context.pages) <= pages_before:
+            return results
+        work_page = context.pages[-1]
+        work_page.wait_for_load_state("domcontentloaded", timeout=5000)
 
-        # === ÉTAPE 2: Boucle sur work_page ===
-        max_iterations = 50
-        
-        for iteration in range(max_iterations):
-            # Attendre la popup au lieu d'un wait fixe de 2s
+        # === Boucle: extraire code du popup, fermer, cliquer suivant via JS ===
+        for iteration in range(total_count):
+            # Attendre la popup
             try:
-                work_page.wait_for_selector("[data-testid='voucherPopup-codeHolder-voucherType-code'] h4", timeout=5000)
+                work_page.wait_for_selector("[data-testid='voucherPopup-codeHolder-voucherType-code'] h4", timeout=2000)
             except:
                 pass
 
-            # 1. Récupérer le code dans la popup
+            # Récupérer le code
             code = None
             try:
-                code_elem = work_page.locator("[data-testid='voucherPopup-codeHolder-voucherType-code'] h4").first
-                if code_elem.count() > 0:
-                    code = code_elem.inner_text().strip()
-                    # Filtrer "Siehe Details" et codes avec espaces (pas de vrais codes)
+                code_el = work_page.locator("[data-testid='voucherPopup-codeHolder-voucherType-code'] h4")
+                if code_el.count() > 0:
+                    code = code_el.first.inner_text().strip()
                     if code == "Siehe Details" or ' ' in code or not code:
                         code = None
             except:
                 pass
-            
-            # 2. Récupérer le titre dans la popup
+
+            # Récupérer le titre
             current_title = None
             try:
-                title_elem = work_page.locator("[data-testid='voucherPopup-header-popupTitleWrapper'] h4").first
-                if title_elem.count() > 0:
-                    current_title = title_elem.inner_text().strip()
+                title_el = work_page.locator("[data-testid='voucherPopup-header-popupTitleWrapper'] h4")
+                if title_el.count() > 0:
+                    current_title = title_el.first.inner_text().strip()
             except:
                 pass
-            
+
             if current_title is None:
                 current_title = f"Offre {iteration + 1}"
-            
-            # Ajouter si code valide et non dupliqué
+
+            # Ajouter si code valide
             if code and code not in processed_codes:
                 processed_codes.add(code)
-                expiration_date = title_to_expiry.get(current_title, "")
-                terms = title_to_terms.get(current_title, "")
                 results.append({
                     "code": code,
                     "title": current_title,
-                    "terms": terms,
-                    "expiration_date": expiration_date
+                    "terms": title_to_terms.get(current_title, ""),
+                    "expiration_date": title_to_expiry.get(current_title, "")
                 })
-            
-            # 3. Fermer la popup avec CloseIcon
+
+            # Fermer la popup
             try:
-                close_icon = work_page.locator("[data-testid='CloseIcon']").first
-                if close_icon.count() > 0:
-                    close_icon.click(timeout=3000)
-                    # Attendre que la popup disparaisse
-                    work_page.wait_for_selector("[data-testid='voucherPopup-codeHolder-voucherType-code']", state="hidden", timeout=3000)
+                work_page.locator("[data-testid='CloseIcon']").first.click(timeout=1000)
+                work_page.wait_for_timeout(300)
             except:
                 pass
-            
-            # 4. Chercher le prochain bouton sur work_page
-            next_buttons = work_page.locator(code_selector)
-            next_count = next_buttons.count()
-            
-            # Index = iteration + 1 (on a déjà traité iteration boutons)
-            next_index = iteration + 1
-            
-            if next_index >= next_count:
+
+            # Cliquer sur le prochain bouton via JS (évite element_handle qui bloque)
+            next_idx = iteration + 1
+            if next_idx >= total_count:
                 break
-            
-            # 5. Cliquer sur le prochain bouton → ouvre nouvel onglet → switch
-            next_btn = next_buttons.nth(next_index)
-            next_btn.scroll_into_view_if_needed()
 
-            pages_before = len(context.pages)
-            work_page.evaluate("(el) => el.click()", next_btn.element_handle())
+            clicked = work_page.evaluate(f"""() => {{
+                var btns = document.querySelectorAll("div[data-testid='active-vouchers-widget'] div[title='Code anzeigen']");
+                if (btns[{next_idx}]) {{
+                    btns[{next_idx}].scrollIntoView({{block: 'center'}});
+                    btns[{next_idx}].click();
+                    return true;
+                }}
+                return false;
+            }}""")
 
-            # Attendre le nouvel onglet au lieu d'un wait fixe
+            if not clicked:
+                break
+
+            # Check si nouvel onglet
             try:
-                context.wait_for_event("page", timeout=5000)
+                context.wait_for_event("page", timeout=2000)
+                if len(context.pages) > 2:
+                    work_page = context.pages[-1]
             except:
-                work_page.wait_for_timeout(1000)
+                work_page.wait_for_timeout(300)
 
-            # Switch vers le nouvel onglet
-            if len(context.pages) > pages_before:
-                work_page = context.pages[-1]
-        
     except PlaywrightTimeout:
         pass
     except Exception as e:
         print(f"[MyDealz] Erreur: {str(e)[:50]}")
-    
+
     return results
 
 
@@ -245,6 +223,7 @@ def main():
             viewport={"width": 1920, "height": 1080},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
+        context.set_default_timeout(15000)  # 15s max per operation to prevent hangs
         page = context.new_page()
         
         for idx, (merchant_row, url) in enumerate(competitor_data, 1):
@@ -255,6 +234,11 @@ def main():
             
             try:
                 codes = scrape_mydealz_all(page, context, url)
+
+                # Fermer tous les onglets sauf le premier pour éviter ERR_INSUFFICIENT_RESOURCES
+                while len(context.pages) > 1:
+                    context.pages[-1].close()
+
                 print(f"   ✅ {len(codes)} codes trouvés")
 
                 for code_info in codes:
